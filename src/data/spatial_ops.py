@@ -10,6 +10,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely.geometry import Point
+from shapely.strtree import STRtree
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,62 @@ def normalize_admin_name(series: pd.Series) -> pd.Series:
         .str.replace(r"\\s+", " ", regex=True)
         .str.strip()
     )
+
+
+def load_opencellid(path: str) -> gpd.GeoDataFrame:
+    """
+    Load OpenCellID CSV (gzip) and return GeoDataFrame of towers.
+
+    Expected columns (no header): radio,mcc,net,area,cell,unit,lon,lat,range,samples,changeable,created,updated,averageSignal
+    """
+
+    col_names = [
+        "radio",
+        "mcc",
+        "net",
+        "area",
+        "cell",
+        "unit",
+        "lon",
+        "lat",
+        "range",
+        "samples",
+        "changeable",
+        "created",
+        "updated",
+        "averageSignal",
+    ]
+    df = pd.read_csv(
+        path,
+        compression="gzip",
+        header=None,
+        names=col_names,
+        dtype={
+            "radio": "string",
+            "mcc": "Int64",
+            "net": "Int64",
+            "area": "Int64",
+            "cell": "Int64",
+            "unit": "Int64",
+            "lon": "float64",
+            "lat": "float64",
+            "range": "float64",
+            "samples": "Int64",
+            "changeable": "Int64",
+            "created": "Int64",
+            "updated": "Int64",
+            "averageSignal": "float64",
+        },
+    )
+    total_rows = len(df)
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df = df.dropna(subset=["lon", "lat"])
+    kept_rows = len(df)
+    LOGGER.info("Loaded OpenCellID: %d rows (kept %d with valid coords)", total_rows, kept_rows)
+    geometry = gpd.points_from_xy(df["lon"], df["lat"])
+    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs=CRS.wgs84)
+    return gdf
 
 
 def _ensure_crs(gdf: gpd.GeoDataFrame, target_crs: str) -> gpd.GeoDataFrame:
@@ -453,6 +510,69 @@ def aggregate_facility_metrics_by_lga(
         dist_non_null,
     )
 
+    return metrics
+
+
+def aggregate_tower_metrics_by_lga(
+    towers_gdf: gpd.GeoDataFrame,
+    lga_gdf: gpd.GeoDataFrame,
+) -> pd.DataFrame:
+    """Aggregate OpenCellID towers to LGAs and compute proximity metrics."""
+
+    towers = _ensure_crs(towers_gdf, CRS.wgs84)
+    lgas = _ensure_crs(lga_gdf, CRS.wgs84).copy()
+
+    if "lga_uid" not in lgas.columns:
+        raise ValueError("lga_uid column required on LGA GeoDataFrame for tower aggregation.")
+
+    # Ensure area
+    if "area_sq_km" not in lgas.columns:
+        lgas_metric = lgas.to_crs(CRS.metric)
+        lgas["area_sq_km"] = lgas_metric.geometry.area / 1_000_000.0
+
+    # Counts
+    join_counts = gpd.sjoin(
+        towers[["geometry"]],
+        lgas[["lga_uid", "geometry"]],
+        how="left",
+        predicate="within",
+    )
+    counts = join_counts.groupby("lga_uid").size().rename("towers_count")
+    counts = counts.reindex(lgas["lga_uid"]).fillna(0).astype(int)
+
+    # Distances to nearest tower
+    lgas_centroids = lgas.copy()
+    lgas_centroids["geometry"] = lgas_centroids.geometry.centroid
+    lgas_centroids = lgas_centroids.to_crs(CRS.metric)
+    towers_metric = towers.to_crs(CRS.metric)
+
+    if towers_metric.empty:
+        dist_series = pd.Series(np.nan, index=lgas["lga_uid"], name="avg_dist_to_tower_km")
+    else:
+        nearest = gpd.sjoin_nearest(
+            lgas_centroids[["lga_uid", "geometry"]],
+            towers_metric[["geometry"]],
+            how="left",
+            distance_col="dist_m",
+        )
+        dist_by_uid = nearest.groupby("lga_uid")["dist_m"].min() / 1000.0
+        dist_series = lgas["lga_uid"].map(dist_by_uid)
+        dist_series.name = "avg_dist_to_tower_km"
+
+    metrics = pd.DataFrame({
+        "lga_uid": lgas["lga_uid"],
+        "towers_count": counts.values,
+        "tower_density_per_km2": np.where(lgas["area_sq_km"] > 0, counts.values / lgas["area_sq_km"], np.nan),
+        "avg_dist_to_tower_km": dist_series.values,
+    })
+
+    coverage_pct = (metrics["towers_count"] > 0).mean() * 100 if len(metrics) else 0.0
+    LOGGER.info(
+        "Tower metrics: %d LGAs, mean towers=%.2f, pct with >=1=%.1f%%",
+        len(metrics),
+        metrics["towers_count"].mean() if len(metrics) else 0,
+        coverage_pct,
+    )
     return metrics
 
 

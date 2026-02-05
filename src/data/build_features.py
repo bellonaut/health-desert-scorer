@@ -15,7 +15,9 @@ from src.data.spatial_ops import (
     aggregate_facility_metrics_by_lga,
     assign_points_to_lga,
     coverage_within_km,
+    aggregate_tower_metrics_by_lga,
     infer_lga_names_from_facilities,
+    load_opencellid,
     load_facilities,
     load_lga_boundaries,
     make_points_from_latlon,
@@ -105,13 +107,20 @@ def _validate_features(df: pd.DataFrame) -> None:
     logging.info("Label coverage: %d of %d LGAs (%.1f%%) have u5mr_mean", labeled, len(df), labeled / len(df) * 100 if len(df) else 0.0)
 
 
-def _build_report(df: pd.DataFrame, output_path: Path) -> None:
+def _build_report(
+    df: pd.DataFrame,
+    output_path: Path,
+    tower_rows_loaded: int = 0,
+    tower_lga_coverage: float = 0.0,
+) -> None:
     report = {
         "rows": len(df),
         "avg_distance_km_mean": float(df["avg_distance_km"].mean()),
         "u5mr_mean_mean": float(df["u5mr_mean"].mean()),
         "facilities_count_total": int(df["facilities_count"].sum()),
         "population_lgas_with_values": int(df["population"].notna().sum()),
+        "tower_rows_loaded": int(tower_rows_loaded),
+        "tower_lga_coverage_pct": float(tower_lga_coverage),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2))
@@ -129,6 +138,7 @@ def build_features(
     state_col: str | None = None,
     pop_lga_col: str | None = None,
     pop_state_col: str | None = None,
+    opencellid_path: Path | None = Path("data/raw/opencellid.csv.gz"),
 ) -> pd.DataFrame:
     logging.info("Loading DHS clusters from %s", clusters_path)
     clusters = _normalize_clusters(pd.read_csv(clusters_path))
@@ -210,6 +220,15 @@ def build_features(
         ["lga_uid", "avg_distance_km", "facilities_count", "facilities_per_10k"]
     ]
 
+    tower_metrics = None
+    tower_rows_loaded = 0
+    tower_lga_coverage = 0.0
+    if opencellid_path and Path(opencellid_path).exists():
+        towers = load_opencellid(str(opencellid_path))
+        tower_rows_loaded = len(towers)
+        tower_metrics = aggregate_tower_metrics_by_lga(towers, lgas)
+        tower_lga_coverage = (tower_metrics["towers_count"] > 0).mean() * 100 if len(tower_metrics) else 0.0
+
     coverage_df = coverage_within_km(lgas, facilities, km=coverage_km)
     if "population_covered_pct" in coverage_df.columns:
         coverage_df = coverage_df.rename(columns={"population_covered_pct": "coverage_5km"})
@@ -220,6 +239,8 @@ def build_features(
     features = grouped.merge(facilities_metrics, on="lga_uid", how="left").merge(
         coverage_df[["lga_uid", "coverage_5km"]], on="lga_uid", how="left"
     )
+    if tower_metrics is not None:
+        features = features.merge(tower_metrics, on="lga_uid", how="left")
 
     # Area in km^2 for density
     lga_area = lgas[["lga_uid", "geometry"]].copy()
@@ -269,6 +290,12 @@ def build_features(
             features["facilities_count"] / (features["population"] / 10000.0),
             np.nan,
         )
+        if "towers_count" in features.columns:
+            features["towers_per_10k_pop"] = np.where(
+                features["population"] > 0,
+                features["towers_count"] / (features["population"] / 10000.0),
+                np.nan,
+            )
 
     ordered_cols = [
         "lga_uid",
@@ -288,6 +315,10 @@ def build_features(
         "urban_prop",
         "population",
         "population_density",
+        "towers_count",
+        "tower_density_per_km2",
+        "avg_dist_to_tower_km",
+        "towers_per_10k_pop",
         "coverage_5km",
     ]
     for col in ordered_cols:
@@ -298,11 +329,22 @@ def build_features(
     _validate_features(features)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     features.to_csv(output_path, index=False)
-    _build_report(features, report_path)
-    logging.info("OK: built features with %d LGAs", len(features))
+    _build_report(
+        features,
+        report_path,
+        tower_rows_loaded=tower_rows_loaded,
+        tower_lga_coverage=tower_lga_coverage,
+    )
+    logging.info(
+        "OK: built features with %d LGAs | towers_mean=%.2f | pct_LGAs_with_tower=%.1f%%",
+        len(features),
+        features["towers_count"].mean() if "towers_count" in features else 0,
+        (features["towers_count"] > 0).mean() * 100 if "towers_count" in features else 0,
+    )
     print(
         f"OK: {len(features)} LGAs | avg_distance_km mean={features['avg_distance_km'].mean():.2f} | "
-        f"u5mr_mean mean={features['u5mr_mean'].mean():.2f}"
+        f"u5mr_mean mean={features['u5mr_mean'].mean():.2f} | "
+        f"towers_count mean={features['towers_count'].mean() if 'towers_count' in features else 0:.2f}"
     )
     return features
 
@@ -313,6 +355,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lga", type=Path, default=Path("data/raw/lga_boundaries.geojson"))
     parser.add_argument("--facilities", type=Path, default=Path("data/raw/health_facilities.geojson"))
     parser.add_argument("--population", type=Path, default=None)
+    parser.add_argument("--opencellid", type=Path, default=Path("data/raw/opencellid.csv.gz"))
     parser.add_argument("--output", type=Path, default=Path("data/processed/lga_features.csv"))
     parser.add_argument("--report", type=Path, default=Path("docs/build_features_report.json"))
     parser.add_argument("--coverage-km", type=float, default=5.0)
@@ -338,6 +381,7 @@ def main() -> None:
         lga_path=args.lga,
         facilities_path=args.facilities,
         population_path=args.population,
+        opencellid_path=args.opencellid,
         output_path=args.output,
         report_path=args.report,
         coverage_km=args.coverage_km,
