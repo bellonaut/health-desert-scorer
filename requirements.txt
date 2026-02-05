@@ -1,0 +1,12 @@
+geopandas
+joblib
+matplotlib
+numpy
+pandas
+pydeck
+pyproj
+requests
+scikit-learn
+shapely
+streamlit
+xgboost
