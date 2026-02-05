@@ -15,6 +15,7 @@ from src.data.spatial_ops import (
     aggregate_facility_metrics_by_lga,
     assign_points_to_lga,
     coverage_within_km,
+    infer_lga_names_from_facilities,
     load_facilities,
     load_lga_boundaries,
     make_points_from_latlon,
@@ -30,15 +31,83 @@ def _configure_logging() -> None:
     )
 
 
+def _normalize_clusters(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize cluster column names and types."""
+
+    lat_candidates = ("latitude", "lat", "LAT", "LATITUDE", "cluster_lat", "y")
+    lon_candidates = ("longitude", "lon", "LON", "LONGITUDE", "cluster_lon", "x")
+    urban_candidates = ("urban_rural", "urban", "URBAN", "is_urban")
+
+    lower_map = {col.lower(): col for col in df.columns}
+    lat_src = next((lower_map.get(c.lower()) for c in lat_candidates if c.lower() in lower_map), None)
+    lon_src = next((lower_map.get(c.lower()) for c in lon_candidates if c.lower() in lower_map), None)
+    urban_src = next((lower_map.get(c.lower()) for c in urban_candidates if c.lower() in lower_map), None)
+
+    if not lat_src or not lon_src:
+        first_row = df.head(1).to_dict(orient="records")
+        raise ValueError(
+            f"Could not locate latitude/longitude columns in clusters CSV. "
+            f"Columns: {list(df.columns)}; first row: {first_row}"
+        )
+
+    df = df.rename(columns={lat_src: "latitude", lon_src: "longitude"})
+    df["lat"] = df["latitude"]
+    df["lon"] = df["longitude"]
+
+    if urban_src:
+        df = df.rename(columns={urban_src: "urban"}) if urban_src != "urban" else df
+        urban_series = df["urban"]
+        if urban_series.dtype == bool:
+            df["urban"] = urban_series.astype(int)
+        elif pd.api.types.is_numeric_dtype(urban_series):
+            # Keep as numeric 0/1
+            df["urban"] = urban_series.astype(float)
+        else:
+            mapped = (
+                urban_series.astype(str)
+                .str.strip()
+                .str.upper()
+                .map({"URBAN": 1, "U": 1, "RURAL": 0, "R": 0})
+            )
+            df["urban"] = mapped
+            # If mapping failed (NaN), leave as NaN to avoid misleading mean
+    logging.info(
+        "Mapped %s->latitude, %s->longitude%s",
+        lat_src,
+        lon_src,
+        f", {urban_src}->urban" if urban_src else ", no urban column mapped",
+    )
+    return df
+
+
+def _norm_key(series: pd.Series) -> pd.Series:
+    """Normalize string keys for deterministic joining."""
+
+    return (
+        series.fillna("")
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .str.replace(r"\s+", " ", regex=True)
+    )
+
+
 def _validate_features(df: pd.DataFrame) -> None:
-    if df["lga_name"].duplicated().any():
-        raise ValueError("Duplicate lga_name entries found in features.")
+    if df["lga_uid"].duplicated().any():
+        dup_keys = df.loc[df["lga_uid"].duplicated(), "lga_uid"].head(10).tolist()
+        raise ValueError(f"Duplicate lga_uid entries found in features. Sample duplicates: {dup_keys}")
+    dup_lga_names = df["lga_name"].value_counts()
+    dup_lga_names = dup_lga_names[dup_lga_names > 1]
+    if not dup_lga_names.empty:
+        logging.info("Found %d duplicated lga_name values; top: %s", len(dup_lga_names), dup_lga_names.head(10).to_dict())
     if len(df) < 500:
         logging.warning("Row count (%d) below expected Nigeria LGA count.", len(df))
     if not df["avg_distance_km"].between(0, 200).all():
         raise ValueError("avg_distance_km values out of expected range 0-200 km.")
     if (df["facilities_per_10k"] < 0).any():
         raise ValueError("facilities_per_10k contains negative values.")
+    labeled = df["u5mr_mean"].notna().sum()
+    logging.info("Label coverage: %d of %d LGAs (%.1f%%) have u5mr_mean", labeled, len(df), labeled / len(df) * 100 if len(df) else 0.0)
 
 
 def _build_report(df: pd.DataFrame, output_path: Path) -> None:
@@ -60,18 +129,54 @@ def build_features(
     output_path: Path,
     report_path: Path,
     coverage_km: float,
+    lga_col: str | None = None,
+    state_col: str | None = None,
 ) -> pd.DataFrame:
     logging.info("Loading DHS clusters from %s", clusters_path)
-    clusters = pd.read_csv(clusters_path)
-    points = make_points_from_latlon(clusters, lat_col="lat", lon_col="lon")
+    clusters = _normalize_clusters(pd.read_csv(clusters_path))
+    points = make_points_from_latlon(clusters, lat_col="latitude", lon_col="longitude")
 
-    lgas = load_lga_boundaries(str(lga_path))
+    lgas = load_lga_boundaries(str(lga_path), lga_col=lga_col, state_col=state_col)
     facilities = load_facilities(str(facilities_path))
+
+    need_inference = (
+        "lga_name" not in lgas.columns
+        or lgas["lga_name"].isna().all()
+        or lgas["lga_name"].astype(str).str.strip().eq("").all()
+    )
+    if need_inference or lgas["lga_name"].isna().any() or lgas["lga_name"].astype(str).str.strip().eq("").any():
+        logging.info("Inferring LGA names via facilities overlay.")
+        lgas = infer_lga_names_from_facilities(lgas, facilities)
+        non_placeholder_fraction = (
+            ~lgas["lga_name"].astype(str).str.startswith("LGA_")
+        ).mean()
+        if non_placeholder_fraction < 0.5:
+            raise ValueError(
+                "Fewer than 50% of polygons received non-placeholder LGA names after inference; "
+                "the boundary file may not match the facilities geography."
+            )
+
+    # Identity and composite keys
+    lgas = lgas.copy()
+    if "lga_id" not in lgas:
+        lgas["lga_id"] = np.arange(len(lgas))
+    lgas["lga_uid"] = lgas["lga_id"]
+    lgas["state_name"] = lgas.get("state_name", pd.Series(index=lgas.index, dtype=object)).fillna("")
+    lgas["lga_name"] = lgas["lga_name"].astype(str)
+    state_clean = lgas["state_name"].astype(str).str.strip()
+    lga_clean = lgas["lga_name"].astype(str).str.strip()
+    lgas["state_lga"] = state_clean + "__" + lga_clean
+    lgas["state_lga_norm"] = _norm_key(state_clean) + "__" + _norm_key(lga_clean)
 
     joined = assign_points_to_lga(points, lgas)
     joined["u5mr"] = joined["u5_deaths"] / joined["live_births"] * 1000.0
+    joined["lga_uid"] = joined["lga_id"]
 
-    grouped = joined.groupby("lga_name").agg(
+    def _first_nonnull(s: pd.Series):
+        s = s.dropna()
+        return s.iloc[0] if len(s) else np.nan
+
+    outcomes = joined.groupby("lga_uid").agg(
         u5mr_mean=("u5mr", "mean"),
         u5mr_median=("u5mr", "median"),
         live_births_sum=("live_births", "sum"),
@@ -79,12 +184,12 @@ def build_features(
         urban_prop=("urban", "mean"),
         lga_lat=("lat", "mean"),
         lga_lon=("lon", "mean"),
-    )
-    grouped = grouped.reset_index()
+    ).reset_index()
 
-    if "state_name" in joined:
-        state_map = joined.groupby("lga_name")["state_name"].agg(lambda x: x.dropna().iloc[0] if len(x) else None)
-        grouped = grouped.merge(state_map.rename("state_name"), on="lga_name", how="left")
+    # Base table: all LGAs
+    base = lgas[["lga_uid", "state_name", "lga_name", "state_lga", "state_lga_norm"]].drop_duplicates("lga_uid")
+
+    grouped = base.merge(outcomes, on="lga_uid", how="left")
 
     population_df = None
     if population_path and population_path.exists():
@@ -92,30 +197,54 @@ def build_features(
         if "population" not in population_df.columns:
             raise ValueError("Population file must include 'population' column.")
 
-    facilities_metrics = aggregate_facility_metrics_by_lga(facilities, lgas, population_df)
-    facilities_metrics = facilities_metrics.rename(columns={"avg_distance_km_proxy": "avg_distance_km"})
+    facilities_metrics = aggregate_facility_metrics_by_lga(facilities, lgas, population_df=None)
+    facilities_metrics = facilities_metrics.rename(
+        columns={"avg_distance_km_proxy": "avg_distance_km", "lga_id": "lga_uid"}
+    )
+    facilities_metrics = facilities_metrics[
+        ["lga_uid", "avg_distance_km", "facilities_count", "facilities_per_10k"]
+    ]
 
     coverage_df = coverage_within_km(lgas, facilities, km=coverage_km)
     if "population_covered_pct" in coverage_df.columns:
         coverage_df = coverage_df.rename(columns={"population_covered_pct": "coverage_5km"})
     else:
         coverage_df = coverage_df.rename(columns={"area_covered_pct": "coverage_5km"})
+    coverage_df = coverage_df.rename(columns={"lga_id": "lga_uid"})
 
-    features = grouped.merge(facilities_metrics, on="lga_name", how="left").merge(
-        coverage_df, on="lga_name", how="left"
+    features = grouped.merge(facilities_metrics, on="lga_uid", how="left").merge(
+        coverage_df[["lga_uid", "coverage_5km"]], on="lga_uid", how="left"
     )
 
     if population_df is not None and "population" in population_df.columns:
-        features = features.merge(population_df[["lga_name", "population"]], on="lga_name", how="left")
-        if "area_sq_km" in population_df.columns:
-            features["population_density"] = features["population"] / population_df["area_sq_km"]
+        pop_df = population_df.copy()
+        if {"state_name", "lga_name"}.issubset(pop_df.columns):
+            pop_df["state_lga_norm"] = _norm_key(pop_df["state_name"]) + "__" + _norm_key(pop_df["lga_name"])
+            merge_cols = ["state_lga_norm", "population"]
+            if "area_sq_km" in pop_df.columns:
+                merge_cols.append("area_sq_km")
+            features = features.merge(pop_df[merge_cols], on="state_lga_norm", how="left")
+        else:
+            merge_cols = ["lga_name", "population"]
+            if "area_sq_km" in pop_df.columns:
+                merge_cols.append("area_sq_km")
+            features = features.merge(pop_df[merge_cols], on="lga_name", how="left")
+        if "area_sq_km" in features.columns:
+            features["population_density"] = features["population"] / features["area_sq_km"]
+        else:
+            features["population_density"] = np.nan
     else:
         features["population"] = np.nan
         features["population_density"] = np.nan
 
+    if features["population"].notna().any():
+        features["facilities_per_10k"] = features["facilities_count"] / (features["population"] / 10000.0)
+
     ordered_cols = [
+        "lga_uid",
         "lga_name",
         "state_name",
+        "state_lga",
         "lga_lat",
         "lga_lon",
         "u5mr_mean",
@@ -156,6 +285,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("data/processed/lga_features.csv"))
     parser.add_argument("--report", type=Path, default=Path("docs/build_features_report.json"))
     parser.add_argument("--coverage-km", type=float, default=5.0)
+    parser.add_argument("--lga-col", type=str, default=None, help="Override LGA column name in boundary file.")
+    parser.add_argument("--state-col", type=str, default=None, help="Override state column name in boundary file.")
     return parser.parse_args()
 
 
@@ -177,6 +308,8 @@ def main() -> None:
         output_path=args.output,
         report_path=args.report,
         coverage_km=args.coverage_km,
+        lga_col=args.lga_col,
+        state_col=args.state_col,
     )
 
 

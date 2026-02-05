@@ -7,6 +7,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+
+try:
+    from shapely.validation import make_valid
+except ImportError:  # shapely < 2.0
+    make_valid = None
 
 
 def configure_logging() -> None:
@@ -20,8 +27,71 @@ def configure_logging() -> None:
 
 def create_mock_clusters(output_path: Path, n_clusters: int = 1200, seed: int = 42) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
-    lat = rng.uniform(4.0, 14.2, size=n_clusters)
-    lon = rng.uniform(2.5, 14.8, size=n_clusters)
+    boundary_path = Path("data/raw/lga_boundaries.geojson")
+
+    if boundary_path.exists():
+        lga_gdf = gpd.read_file(boundary_path)
+        if lga_gdf.empty:
+            logging.warning("Boundary file exists but is empty; falling back to bbox sampling.")
+            use_boundary = False
+        else:
+            if not lga_gdf.geometry.is_valid.all():
+                if make_valid:
+                    lga_gdf["geometry"] = lga_gdf.geometry.apply(make_valid)
+                else:
+                    lga_gdf["geometry"] = lga_gdf.geometry.buffer(0)
+            union_geom = lga_gdf.unary_union
+            if not union_geom.is_valid:
+                union_geom = union_geom.buffer(0)
+            bounds = lga_gdf.total_bounds  # minx, miny, maxx, maxy
+            minx, miny, maxx, maxy = bounds
+
+            accepted_lat = []
+            accepted_lon = []
+            attempts = 0
+            max_attempts = 50 * n_clusters
+
+            while len(accepted_lat) < n_clusters and attempts < max_attempts:
+                cand_lon = rng.uniform(minx, maxx)
+                cand_lat = rng.uniform(miny, maxy)
+                attempts += 1
+                if union_geom.intersects(Point(cand_lon, cand_lat)):
+                    accepted_lat.append(cand_lat)
+                    accepted_lon.append(cand_lon)
+
+            if len(accepted_lat) < n_clusters:
+                raise ValueError(
+                    "Failed to sample enough points within LGA boundaries. "
+                    f"Accepted {len(accepted_lat)} of {n_clusters} after {attempts} attempts. "
+                    "Check boundary geometry validity."
+                )
+
+            lat = np.array(accepted_lat)
+            lon = np.array(accepted_lon)
+            acceptance_rate = len(accepted_lat) / attempts
+            sample_bounds = (float(min(lon)), float(max(lon)), float(min(lat)), float(max(lat)))
+            logging.info(
+                "Sampled mock clusters within LGA union: acceptance=%.2f%% over %d attempts; "
+                "sample bounds lon=[%.3f, %.3f], lat=[%.3f, %.3f]",
+                acceptance_rate * 100,
+                attempts,
+                sample_bounds[0],
+                sample_bounds[1],
+                sample_bounds[2],
+                sample_bounds[3],
+            )
+            print(
+                f"Sampling within LGA union: acceptance={acceptance_rate:.2%} over {attempts} attempts; "
+                f"sample bounds lon=[{sample_bounds[0]:.3f},{sample_bounds[1]:.3f}], "
+                f"lat=[{sample_bounds[2]:.3f},{sample_bounds[3]:.3f}]"
+            )
+            use_boundary = True
+    else:
+        use_boundary = False
+
+    if not use_boundary:
+        lat = rng.uniform(4.0, 14.2, size=n_clusters)
+        lon = rng.uniform(2.5, 14.8, size=n_clusters)
 
     hub_centers = np.array(
         [

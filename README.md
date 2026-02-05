@@ -2,6 +2,8 @@
 
 This project builds LGA-level health access features for Nigeria, trains risk models, and provides a Streamlit app for exploration. DHS microdata must **never** be committed; only aggregated LGA-level outputs belong in `data/processed/`. DHS cluster locations are displaced and this pipeline respects that by operating on aggregated outputs only.
 
+> Recommended Python: 3.11 or 3.12 on Windows for geospatial dependencies.
+
 ### Run instructions
 
 1. **Create mock DHS clusters (optional for demo data)**
