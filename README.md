@@ -37,6 +37,7 @@ This project builds LGA-level health access features for Nigeria, trains risk mo
 ### RUN ORDER
 - [ ] `python scripts/create_mock_dhs.py`
 - [ ] `python scripts/download_open_data.py`
+- [ ] `python scripts/aggregate_population.py`
 - [ ] `python -m src.data.build_features`
 - [ ] `python -m src.models.train_models`
 - [ ] `streamlit run app/app.py`

@@ -246,13 +246,19 @@ def build_features(
             features["population_density"] = np.nan
         matched = features["population"].notna().sum()
         unmatched_keys = features.loc[features["population"].isna(), "state_lga_norm"].head(10).tolist()
+        coverage = matched / len(features) * 100 if len(features) else 0.0
         logging.info(
             "Population merge: matched %d / %d LGAs (%.1f%%). Sample unmatched keys: %s",
             matched,
             len(features),
-            matched / len(features) * 100 if len(features) else 0.0,
+            coverage,
             unmatched_keys,
         )
+        if coverage < 90:
+            raise ValueError(
+                f"Population merge coverage too low: {coverage:.1f}%. "
+                f"Sample unmatched keys: {unmatched_keys}"
+            )
     else:
         features["population"] = np.nan
         features["population_density"] = np.nan
