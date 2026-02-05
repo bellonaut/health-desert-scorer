@@ -4,6 +4,7 @@ __pycache__/
 data/raw/
 data/processed/*
 !data/processed/.gitkeep
+data/external/
 models/
 *.pkl
 *.json
