@@ -8,3 +8,4 @@ models/
 *.pkl
 *.json
 .DS_Store
+logs/
