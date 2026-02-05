@@ -25,6 +25,19 @@ class CRSConfig:
 CRS = CRSConfig()
 
 
+def normalize_admin_name(series: pd.Series) -> pd.Series:
+    """Normalize admin names for robust joining (uppercase, trim, collapse whitespace, remove punctuation)."""
+
+    return (
+        series.fillna("")
+        .astype(str)
+        .str.upper()
+        .str.replace(r"[./\\'-]", " ", regex=True)
+        .str.replace(r"\\s+", " ", regex=True)
+        .str.strip()
+    )
+
+
 def _ensure_crs(gdf: gpd.GeoDataFrame, target_crs: str) -> gpd.GeoDataFrame:
     if gdf.crs is None:
         raise ValueError("GeoDataFrame missing CRS; please set a CRS before operations.")

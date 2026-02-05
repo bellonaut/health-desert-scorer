@@ -19,6 +19,7 @@ from src.data.spatial_ops import (
     load_facilities,
     load_lga_boundaries,
     make_points_from_latlon,
+    normalize_admin_name,
 )
 
 
@@ -83,13 +84,7 @@ def _normalize_clusters(df: pd.DataFrame) -> pd.DataFrame:
 def _norm_key(series: pd.Series) -> pd.Series:
     """Normalize string keys for deterministic joining."""
 
-    return (
-        series.fillna("")
-        .astype(str)
-        .str.upper()
-        .str.strip()
-        .str.replace(r"\s+", " ", regex=True)
-    )
+    return normalize_admin_name(series)
 
 
 def _validate_features(df: pd.DataFrame) -> None:
@@ -116,6 +111,7 @@ def _build_report(df: pd.DataFrame, output_path: Path) -> None:
         "avg_distance_km_mean": float(df["avg_distance_km"].mean()),
         "u5mr_mean_mean": float(df["u5mr_mean"].mean()),
         "facilities_count_total": int(df["facilities_count"].sum()),
+        "population_lgas_with_values": int(df["population"].notna().sum()),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2))
@@ -131,6 +127,8 @@ def build_features(
     coverage_km: float,
     lga_col: str | None = None,
     state_col: str | None = None,
+    pop_lga_col: str | None = None,
+    pop_state_col: str | None = None,
 ) -> pd.DataFrame:
     logging.info("Loading DHS clusters from %s", clusters_path)
     clusters = _normalize_clusters(pd.read_csv(clusters_path))
@@ -194,8 +192,15 @@ def build_features(
     population_df = None
     if population_path and population_path.exists():
         population_df = pd.read_csv(population_path)
+        if pop_lga_col and pop_lga_col in population_df.columns:
+            population_df = population_df.rename(columns={pop_lga_col: "lga_name"})
+        if pop_state_col and pop_state_col in population_df.columns:
+            population_df = population_df.rename(columns={pop_state_col: "state_name"})
         if "population" not in population_df.columns:
             raise ValueError("Population file must include 'population' column.")
+        population_df["lga_name"] = population_df["lga_name"].astype(str)
+        population_df["state_name"] = population_df.get("state_name", pd.Series(index=population_df.index, dtype=object)).fillna("")
+        population_df["state_lga_norm"] = _norm_key(population_df["state_name"]) + "__" + _norm_key(population_df["lga_name"])
 
     facilities_metrics = aggregate_facility_metrics_by_lga(facilities, lgas, population_df=None)
     facilities_metrics = facilities_metrics.rename(
@@ -216,6 +221,12 @@ def build_features(
         coverage_df[["lga_uid", "coverage_5km"]], on="lga_uid", how="left"
     )
 
+    # Area in km^2 for density
+    lga_area = lgas[["lga_uid", "geometry"]].copy()
+    lga_area = lga_area.to_crs(CRS.metric)
+    lga_area["area_sq_km"] = lga_area.geometry.area / 1_000_000.0
+    features = features.merge(lga_area[["lga_uid", "area_sq_km"]], on="lga_uid", how="left")
+
     if population_df is not None and "population" in population_df.columns:
         pop_df = population_df.copy()
         if {"state_name", "lga_name"}.issubset(pop_df.columns):
@@ -233,18 +244,32 @@ def build_features(
             features["population_density"] = features["population"] / features["area_sq_km"]
         else:
             features["population_density"] = np.nan
+        matched = features["population"].notna().sum()
+        unmatched_keys = features.loc[features["population"].isna(), "state_lga_norm"].head(10).tolist()
+        logging.info(
+            "Population merge: matched %d / %d LGAs (%.1f%%). Sample unmatched keys: %s",
+            matched,
+            len(features),
+            matched / len(features) * 100 if len(features) else 0.0,
+            unmatched_keys,
+        )
     else:
         features["population"] = np.nan
         features["population_density"] = np.nan
 
     if features["population"].notna().any():
-        features["facilities_per_10k"] = features["facilities_count"] / (features["population"] / 10000.0)
+        features["facilities_per_10k"] = np.where(
+            features["population"] > 0,
+            features["facilities_count"] / (features["population"] / 10000.0),
+            np.nan,
+        )
 
     ordered_cols = [
         "lga_uid",
         "lga_name",
         "state_name",
         "state_lga",
+        "area_sq_km",
         "lga_lat",
         "lga_lon",
         "u5mr_mean",
@@ -287,6 +312,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--coverage-km", type=float, default=5.0)
     parser.add_argument("--lga-col", type=str, default=None, help="Override LGA column name in boundary file.")
     parser.add_argument("--state-col", type=str, default=None, help="Override state column name in boundary file.")
+    parser.add_argument("--pop-lga-col", type=str, default=None, help="Override LGA column in population file.")
+    parser.add_argument("--pop-state-col", type=str, default=None, help="Override state column in population file.")
     return parser.parse_args()
 
 
@@ -310,6 +337,8 @@ def main() -> None:
         coverage_km=args.coverage_km,
         lga_col=args.lga_col,
         state_col=args.state_col,
+        pop_lga_col=args.pop_lga_col,
+        pop_state_col=args.pop_state_col,
     )
 
 

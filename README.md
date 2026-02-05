@@ -28,6 +28,12 @@ This project builds LGA-level health access features for Nigeria, trains risk mo
    streamlit run app/app.py
    ```
 
+### Stage A Baseline (frozen)
+- Uses mock DHS-derived labels (demo only); access metrics come from real boundaries/facilities inputs.
+- Outputs: `data/processed/lga_features.csv` and `docs/build_features_report.json`.
+- Pipeline runner: `python scripts/create_mock_dhs.py`, `python scripts/download_open_data.py`, then `python -m src.data.build_features` (or use `scripts/run_stage_a.ps1` on Windows).
+- Intended as a reproducible baseline before any model changes; keep DHS microdata out of the repo.
+
 ### RUN ORDER
 - [ ] `python scripts/create_mock_dhs.py`
 - [ ] `python scripts/download_open_data.py`
