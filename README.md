@@ -34,6 +34,10 @@ This project builds LGA-level health access features for Nigeria, trains risk mo
 - Pipeline runner: `python scripts/create_mock_dhs.py`, `python scripts/download_open_data.py`, then `python -m src.data.build_features` (or use `scripts/run_stage_a.ps1` on Windows).
 - Intended as a reproducible baseline before any model changes; keep DHS microdata out of the repo.
 
+### DHS cluster exports (Nigeria 2013/2018)
+- DHS sampling weights are scaled as `v005 / 1_000_000`.
+- North/South checks use `V024` mapping: North = North Central, North East, North West; South = South East, South South, South West.
+
 ### RUN ORDER
 - [ ] `python scripts/create_mock_dhs.py`
 - [ ] `python scripts/download_open_data.py`
