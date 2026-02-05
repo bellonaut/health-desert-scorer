@@ -202,14 +202,12 @@ def build_features(
     population_df = None
     if population_path and population_path.exists():
         population_df = pd.read_csv(population_path)
-        if pop_lga_col and pop_lga_col in population_df.columns:
-            population_df = population_df.rename(columns={pop_lga_col: "lga_name"})
-        if pop_state_col and pop_state_col in population_df.columns:
-            population_df = population_df.rename(columns={pop_state_col: "state_name"})
-        if "population" not in population_df.columns:
-            raise ValueError("Population file must include 'population' column.")
-        population_df["lga_name"] = population_df["lga_name"].astype(str)
-        population_df["state_name"] = population_df.get("state_name", pd.Series(index=population_df.index, dtype=object)).fillna("")
+        expected = {"lga_name", "state_name", "population"}
+        missing_cols = expected - set(population_df.columns)
+        if missing_cols:
+            raise ValueError(f"Population file missing required columns: {missing_cols}")
+        population_df["lga_name"] = population_df["lga_name"].astype(str).fillna("")
+        population_df["state_name"] = population_df["state_name"].astype(str).fillna("")
         population_df["state_lga_norm"] = _norm_key(population_df["state_name"]) + "__" + _norm_key(population_df["lga_name"])
 
     facilities_metrics = aggregate_facility_metrics_by_lga(facilities, lgas, population_df=None)
@@ -267,17 +265,26 @@ def build_features(
             features["population_density"] = np.nan
         matched = features["population"].notna().sum()
         unmatched_keys = features.loc[features["population"].isna(), "state_lga_norm"].head(10).tolist()
-        coverage = matched / len(features) * 100 if len(features) else 0.0
+        coverage = matched / len(features) if len(features) else 0.0
         logging.info(
             "Population merge: matched %d / %d LGAs (%.1f%%). Sample unmatched keys: %s",
             matched,
             len(features),
-            coverage,
+            coverage * 100,
             unmatched_keys,
         )
-        if coverage < 90:
+        min_pop = features["population"].min(skipna=True)
+        max_pop = features["population"].max(skipna=True)
+        zero_pop = ((features["population"] == 0) & features["population"].notna()).sum()
+        logging.info(
+            "Population stats: min=%.0f max=%.0f zero_pop_lgas=%d",
+            min_pop if pd.notna(min_pop) else float("nan"),
+            max_pop if pd.notna(max_pop) else float("nan"),
+            zero_pop,
+        )
+        if coverage < 0.98:
             raise ValueError(
-                f"Population merge coverage too low: {coverage:.1f}%. "
+                f"Population merge coverage too low: {coverage:.1%}. "
                 f"Sample unmatched keys: {unmatched_keys}"
             )
     else:
@@ -354,7 +361,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clusters", type=Path, default=Path("data/raw/mock_dhs_clusters.csv"))
     parser.add_argument("--lga", type=Path, default=Path("data/raw/lga_boundaries.geojson"))
     parser.add_argument("--facilities", type=Path, default=Path("data/raw/health_facilities.geojson"))
-    parser.add_argument("--population", type=Path, default=None)
+    parser.add_argument("--population", type=Path, default=Path("data/processed/population_lga_canonical.csv"))
     parser.add_argument("--opencellid", type=Path, default=Path("data/raw/opencellid.csv.gz"))
     parser.add_argument("--output", type=Path, default=Path("data/processed/lga_features.csv"))
     parser.add_argument("--report", type=Path, default=Path("docs/build_features_report.json"))
