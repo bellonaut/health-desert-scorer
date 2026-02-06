@@ -10,7 +10,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely.geometry import Point
-from shapely.strtree import STRtree
+
+from src.config import (
+    MIN_SPATIAL_JOIN_SUCCESS_RATE,
+    POINT_BUFFER_METERS,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -354,7 +358,7 @@ def assign_points_to_lga(points_gdf: gpd.GeoDataFrame, lga_gdf: gpd.GeoDataFrame
     if points.crs != lgas.crs:
         points = points.to_crs(lgas.crs)
 
-    min_success_rate = 0.7
+    min_success_rate = MIN_SPATIAL_JOIN_SUCCESS_RATE
     attempts = []
 
     def _attempt_join(p_gdf: gpd.GeoDataFrame, predicate: str, label: str):
@@ -373,10 +377,13 @@ def assign_points_to_lga(points_gdf: gpd.GeoDataFrame, lga_gdf: gpd.GeoDataFrame
         joined, rate = _attempt_join(points, "intersects", "intersects")
 
     if rate < min_success_rate:
-        LOGGER.warning("Spatial join still low (%.2f%%); buffering points by 50m in metric CRS for retry.",
-                       rate * 100)
+        LOGGER.warning(
+            "Spatial join still low (%.2f%%); buffering points by %dm in metric CRS for retry.",
+            rate * 100,
+            POINT_BUFFER_METERS,
+        )
         buffered = points.to_crs(CRS.metric).copy()
-        buffered["geometry"] = buffered.geometry.buffer(50)
+        buffered["geometry"] = buffered.geometry.buffer(POINT_BUFFER_METERS)
         buffered = buffered.to_crs(lgas.crs)
         joined, rate = _attempt_join(buffered, "intersects", "buffered_intersects")
 
@@ -588,6 +595,7 @@ def coverage_within_km(
         lgas["lga_id"] = np.arange(len(lgas))
     facilities = _ensure_crs(facilities_gdf, CRS.wgs84).to_crs(CRS.metric)
     buffer_geom = facilities.buffer(km * 1000.0)
+    buffer_union = buffer_geom.union_all()
     coverage = []
 
     if population_raster:
@@ -611,12 +619,16 @@ def coverage_within_km(
                     coverage.append({"lga_id": row["lga_id"], "lga_name": row["lga_name"], "population_covered_pct": pct})
             return pd.DataFrame(coverage)
 
-    for _, row in lgas.iterrows():
-        lga_area = row.geometry.area
-        covered_area = buffer_geom.intersection(row.geometry).area.sum()
-        pct = (covered_area / lga_area) * 100 if lga_area > 0 else np.nan
-        coverage.append({"lga_id": row["lga_id"], "lga_name": row["lga_name"], "area_covered_pct": pct})
-    return pd.DataFrame(coverage)
+    lga_area = lgas.geometry.area
+    covered_area = lgas.geometry.intersection(buffer_union).area
+    pct = np.where(lga_area > 0, (covered_area / lga_area) * 100, np.nan)
+    return pd.DataFrame(
+        {
+            "lga_id": lgas["lga_id"].values,
+            "lga_name": lgas["lga_name"].values,
+            "area_covered_pct": pct,
+        }
+    )
 
 
 def make_points_from_latlon(df: pd.DataFrame, lat_col: str = "lat", lon_col: str = "lon") -> gpd.GeoDataFrame:
