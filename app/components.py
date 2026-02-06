@@ -10,17 +10,17 @@ import pydeck as pdk
 import streamlit as st
 
 APPLE_COLORS = {
-    # High-contrast palette tuned for light basemap
-    "green": (0, 140, 70),
-    "yellow": (255, 190, 0),
-    "red": (214, 40, 57),
-    "gray": (200, 200, 200),
-    "ink": (0, 0, 0),
-    "highlight": (0, 190, 255),  # cyan highlight
+    # Soft, desaturated palette tuned for a calm research feel
+    "green": (74, 150, 118),
+    "yellow": (231, 196, 116),
+    "red": (214, 122, 110),
+    "gray": (210, 210, 210),
+    "ink": (28, 32, 36),
+    "highlight": (44, 130, 179),
 }
 
-# Tokenless light basemap with minimal visual noise
-MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+# Lighter basemap with minimal visual noise
+MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json"
 
 
 def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> list[int]:
@@ -32,15 +32,21 @@ def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t
     ]
 
 
-def _value_to_color(value: float | None, higher_is_worse: bool) -> list[int]:
+def _value_to_color(value: float | None, higher_is_worse: bool, smooth: bool) -> list[int]:
     if value is None or np.isnan(value):
         return [*APPLE_COLORS["gray"]]
     value = float(np.clip(value, 0.0, 1.0))
     if not higher_is_worse:
         value = 1.0 - value
-    if value <= 0.5:
-        return _interpolate_color(APPLE_COLORS["green"], APPLE_COLORS["yellow"], value / 0.5)
-    return _interpolate_color(APPLE_COLORS["yellow"], APPLE_COLORS["red"], (value - 0.5) / 0.5)
+    if smooth:
+        if value <= 0.5:
+            return _interpolate_color(APPLE_COLORS["green"], APPLE_COLORS["yellow"], value / 0.5)
+        return _interpolate_color(APPLE_COLORS["yellow"], APPLE_COLORS["red"], (value - 0.5) / 0.5)
+    if value <= 0.33:
+        return [*APPLE_COLORS["green"]]
+    if value <= 0.66:
+        return [*APPLE_COLORS["yellow"]]
+    return [*APPLE_COLORS["red"]]
 
 
 def _compute_percentile_series(series: pd.Series) -> pd.Series:
@@ -57,6 +63,7 @@ def render_map(
     higher_is_worse: bool,
     highlight_lgas: Iterable[str] | None = None,
     view_state: pdk.ViewState | None = None,
+    smooth_gradient: bool = True,
     **_: object,
 ) -> None:
     """Render choropleth map with metric-driven colors and plain-language tooltip."""
@@ -68,13 +75,13 @@ def render_map(
 
     styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
     styled["fill_color"] = styled["metric_percentile"].apply(
-        lambda value: _value_to_color(value, higher_is_worse) + [255],
+        lambda value: _value_to_color(value, higher_is_worse, smooth_gradient) + [210],
     )
     highlight_set = set(highlight_lgas or [])
     styled["line_color"] = styled["lga_name"].apply(
-        lambda name: [*APPLE_COLORS["highlight"], 255] if name in highlight_set else [*APPLE_COLORS["ink"], 230],
+        lambda name: [*APPLE_COLORS["ink"], 220],
     )
-    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.5 if name in highlight_set else 2.0)
+    styled["line_width"] = styled["lga_name"].apply(lambda name: 2.2)
 
     def _display_value(value: float | None, digits: int = 2) -> str:
         if value is None or (isinstance(value, float) and np.isnan(value)):
@@ -87,7 +94,7 @@ def render_map(
     styled["towers_display"] = styled["towers_per_10k"].apply(_display_value)
     # Use GeoInterface dict (safer than JSON string for pydeck property access)
     geojson = styled.__geo_interface__
-    layer = pdk.Layer(
+    base_layer = pdk.Layer(
         "GeoJsonLayer",
         geojson,
         pickable=True,
@@ -101,6 +108,21 @@ def render_map(
         lineWidthScale=1,
         lineWidthMinPixels=1.5,
     )
+    highlight_layer = None
+    if highlight_set:
+        highlight_geo = styled[styled["lga_name"].isin(highlight_set)].__geo_interface__
+        highlight_layer = pdk.Layer(
+            "GeoJsonLayer",
+            highlight_geo,
+            pickable=False,
+            stroked=True,
+            filled=False,
+            get_line_color=[*APPLE_COLORS["highlight"], 255],
+            get_line_width=4.5,
+            lineWidthUnits="pixels",
+            lineWidthScale=1,
+            lineWidthMinPixels=2,
+        )
     if view_state is None:
         view_state = pdk.ViewState(latitude=9.0, longitude=8.7, zoom=5)
     elif isinstance(view_state, dict):
@@ -118,7 +140,7 @@ def render_map(
     with st.spinner("Loading map..."):
         st.pydeck_chart(
             pdk.Deck(
-                layers=[layer],
+                layers=[layer for layer in [base_layer, highlight_layer] if layer is not None],
                 initial_view_state=view_state,
                 tooltip=tooltip,
                 map_style=MAP_STYLE,
