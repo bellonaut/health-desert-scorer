@@ -52,6 +52,7 @@ def render_map(
     higher_is_worse: bool,
     highlight_lgas: Iterable[str] | None = None,
     view_state: pdk.ViewState | None = None,
+    **_: object,
 ) -> None:
     """Render choropleth map with metric-driven colors and plain-language tooltip."""
 
