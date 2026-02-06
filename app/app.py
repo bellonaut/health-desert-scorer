@@ -54,22 +54,25 @@ def load_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame | None]:
     preds = pd.read_csv(preds_path)
     shap_df = pd.read_csv(shap_path) if shap_path.exists() else None
 
-    merged = lgas.merge(preds, on="lga_name", how="left").merge(features, on="lga_name", how="left")
-
-    # Coalesce year columns that may have been suffixed by pandas during merges
-    year_cols = [c for c in merged.columns if c.startswith("year")]
-    if "year" in merged.columns:
-        pass
-    elif "year_x" in merged.columns or "year_y" in merged.columns:
-        merged["year"] = merged.get("year_x")
-        if "year_y" in merged.columns:
-            merged["year"] = merged["year"].fillna(merged["year_y"])
+    # Merge predictions and features by both lga_name and year when possible to avoid duplicates
+    preds_has_year = "year" in preds.columns
+    feats_has_year = "year" in features.columns
+    if preds_has_year and feats_has_year:
+        merged = lgas.merge(preds, on="lga_name", how="left").merge(
+            features, on=["lga_name", "year"], how="left"
+        )
     else:
-        merged["year"] = 2018
-    # Drop redundant year columns to keep the dataframe tidy
-    for c in ["year_x", "year_y"]:
-        if c in merged.columns:
-            merged = merged.drop(columns=c)
+        merged = lgas.merge(preds, on="lga_name", how="left").merge(features, on="lga_name", how="left")
+
+    # Coalesce any suffixed year columns
+    if "year" not in merged.columns:
+        merged["year"] = merged.get("year_x") if "year_x" in merged else merged.get("year_y", 2018)
+    if "year_x" in merged.columns:
+        merged = merged.drop(columns="year_x")
+    if "year_y" in merged.columns:
+        merged = merged.drop(columns="year_y")
+
+    merged = merged.drop_duplicates(subset=["lga_name", "year"])
 
     return merged, features, shap_df
 
