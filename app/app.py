@@ -55,8 +55,22 @@ def load_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame | None]:
     shap_df = pd.read_csv(shap_path) if shap_path.exists() else None
 
     merged = lgas.merge(preds, on="lga_name", how="left").merge(features, on="lga_name", how="left")
-    if "year" not in merged.columns:
+
+    # Coalesce year columns that may have been suffixed by pandas during merges
+    year_cols = [c for c in merged.columns if c.startswith("year")]
+    if "year" in merged.columns:
+        pass
+    elif "year_x" in merged.columns or "year_y" in merged.columns:
+        merged["year"] = merged.get("year_x")
+        if "year_y" in merged.columns:
+            merged["year"] = merged["year"].fillna(merged["year_y"])
+    else:
         merged["year"] = 2018
+    # Drop redundant year columns to keep the dataframe tidy
+    for c in ["year_x", "year_y"]:
+        if c in merged.columns:
+            merged = merged.drop(columns=c)
+
     return merged, features, shap_df
 
 
