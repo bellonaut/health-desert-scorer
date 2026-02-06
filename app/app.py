@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 import sys
 
@@ -235,6 +236,30 @@ def _takeaway(row: pd.Series) -> str:
     return f"{' + '.join(statements)}: likely underserved."
 
 
+def _progress_value(value_pct: float | None, higher_is_worse: bool) -> float:
+    if value_pct is None or np.isnan(value_pct):
+        return 0.0
+    value = float(value_pct)
+    if not higher_is_worse:
+        value = 1 - value
+    return float(np.clip(value, 0.0, 1.0))
+
+
+def _render_color_legend() -> None:
+    st.markdown(
+        """
+        <div style="margin-top:0.5rem;margin-bottom:0.5rem;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:0.85rem;color:#4b4b4b;">Better</span>
+                <div style="flex:1;height:10px;border-radius:6px;background:linear-gradient(90deg,#3DAB74,#F7C548,#E15E54);"></div>
+                <span style="font-size:0.85rem;color:#4b4b4b;">Worse</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _get_view_state(filtered: gpd.GeoDataFrame, selected_lgas: list[str]) -> object | None:
     if not selected_lgas:
         return None
@@ -252,23 +277,64 @@ def _get_view_state(filtered: gpd.GeoDataFrame, selected_lgas: list[str]) -> obj
 
 def main() -> None:
     st.set_page_config(page_title="Nigeria Health Desert Risk Scorer", layout="wide")
-    st.title("Nigeria Health Desert Risk Scorer")
-
     st.markdown(
         """
         <style>
-        :root { --surface: #FFFFFF; --background: #F5F5F7; --text: #1D1D1F; --text-muted: #86868B; }
+        :root { --surface: #FFFFFF; --background: #F6F7F9; --text: #1D1D1F; --text-muted: #6E7177; --accent: #008C8F; }
+        .block-container { padding-top: 2.4rem; }
         .app-card {
             background: var(--surface);
-            border-radius: 12px;
+            border-radius: 14px;
             padding: 16px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 8px rgba(0,0,0,0.06);
+            border: 1px solid rgba(0,0,0,0.04);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.05);
         }
         .app-muted { color: var(--text-muted); font-size: 0.85rem; }
+        .app-hero {
+            background: linear-gradient(120deg, rgba(0,140,143,0.08), rgba(255,255,255,0.9));
+            border-radius: 18px;
+            padding: 18px 22px;
+            margin-bottom: 1.2rem;
+            border: 1px solid rgba(0,0,0,0.04);
+        }
+        .app-hero h1 { margin-bottom: 0.2rem; font-size: 2rem; }
+        .app-hero span { color: var(--accent); font-weight: 600; }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown(
+        """
+        <div class="app-hero">
+            <h1>Nigeria Health Desert Risk Scorer</h1>
+            <div class="app-muted">
+                A research-grade view of where <span>child mortality</span>, <span>healthcare access</span>, and
+                <span>digital connectivity</span> overlap.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if "onboarding_seen" not in st.session_state:
+        st.session_state["onboarding_seen"] = False
+    if "onboarding_toast_shown" not in st.session_state:
+        st.session_state["onboarding_toast_shown"] = False
+    if not st.session_state["onboarding_seen"] and not st.session_state["onboarding_toast_shown"]:
+        st.toast("Welcome. This tool helps explore where child mortality, healthcare access, and connectivity intersect.")
+        st.session_state["onboarding_toast_shown"] = True
+    if not st.session_state["onboarding_seen"]:
+        with st.expander("Welcome — start here", expanded=True):
+            st.info(
+                "This tool helps explore where child mortality, healthcare access, and digital connectivity intersect "
+                "across Nigeria."
+            )
+            st.markdown("**Step 1 → Choose what you want to explore**")
+            st.markdown("**Step 2 → Click a hotspot suggestion**")
+            st.markdown("**Step 3 → Compare places side by side**")
+            if st.button("Got it — explore"):
+                st.session_state["onboarding_seen"] = True
 
     merged, features, shap_df = load_data()
     merged = standardize_columns(merged)
@@ -280,7 +346,7 @@ def main() -> None:
     year = st.radio("Year", years, horizontal=True)
     filtered = merged[merged["year"] == year]
 
-    guided_tab, explore_tab = st.tabs(["Guided Tour (Recommended)", "Explore"])
+    guided_tab, explore_tab = st.tabs(["Guided Tour (Recommended)", "Explore Freely"])
 
     with guided_tab:
         st.subheader("Guided Tour: spot patterns in 60 seconds")
@@ -316,7 +382,10 @@ def main() -> None:
                     unsafe_allow_html=True,
                 )
                 if st.button(f"Load: {story['title']}", key=f"story-{story['title']}"):
+                    with st.spinner("Finding focus areas…"):
+                        time.sleep(0.2)
                     st.session_state["guided_selected_lgas"] = story["lga_list"]
+                    st.session_state["guided_last_action"] = story["title"]
 
         st.divider()
         st.markdown("### Step 1: Choose what you want to see")
@@ -341,25 +410,40 @@ def main() -> None:
         hotspot_cols = st.columns(4)
         with hotspot_cols[0]:
             if st.button("Show me the highest-risk areas"):
+                with st.spinner("Finding areas with highest risk…"):
+                    time.sleep(0.2)
                 st.session_state["guided_selected_lgas"] = (
                     filtered.sort_values("risk_prob", ascending=False)["lga_name"].head(4).tolist()
                 )
+                st.session_state["guided_last_action"] = "Highest-risk areas"
         with hotspot_cols[1]:
             if st.button("Show me low-connectivity areas"):
+                with st.spinner("Finding connectivity gaps…"):
+                    time.sleep(0.2)
                 st.session_state["guided_selected_lgas"] = (
                     filtered.sort_values("towers_per_10k", ascending=True)["lga_name"].head(4).tolist()
                 )
+                st.session_state["guided_last_action"] = "Low-connectivity areas"
         with hotspot_cols[2]:
             if st.button("Show me worst access to care"):
+                with st.spinner("Finding access gaps…"):
+                    time.sleep(0.2)
                 st.session_state["guided_selected_lgas"] = (
                     filtered.sort_values("access_score", ascending=False)["lga_name"].head(4).tolist()
                 )
+                st.session_state["guided_last_action"] = "Weak access to care"
         with hotspot_cols[3]:
             if st.button("Surprise me (random example)"):
                 if len(filtered) == 0:
                     st.warning("No LGAs available to sample.")
                 else:
+                    with st.spinner("Picking a surprise set…"):
+                        time.sleep(0.2)
                     st.session_state["guided_selected_lgas"] = filtered.sample(min(3, len(filtered)))["lga_name"].tolist()
+                    st.session_state["guided_last_action"] = "Surprise example"
+
+        if st.session_state.get("guided_last_action"):
+            st.success(f"{st.session_state['guided_last_action']} loaded. Compare them below.")
 
         selected_lgas = st.session_state.get("guided_selected_lgas", [])
         view_state = _get_view_state(filtered, selected_lgas)
@@ -382,6 +466,7 @@ def main() -> None:
             )
         with map_cols[1]:
             st.markdown("**Legend**")
+            _render_color_legend()
             st.markdown("- 🟩 Better / lower risk")
             st.markdown("- 🟨 Medium")
             st.markdown("- 🟥 Worse / higher risk")
@@ -415,18 +500,22 @@ def main() -> None:
                         <div class="app-card">
                             <strong>{row['lga_name']}</strong>
                             <div class="app-muted">{row['state_name']}</div>
-                            <br/>Mortality: {_metric_badge(row.get('u5mr_mean_pct'), True)} ({format_metric(row['u5mr_mean'], metric_defs['u5mr_mean']['unit'])})
-                            <br/>Access: {_metric_badge(row.get('access_score_pct'), True)}
-                            <br/>Connectivity: {_metric_badge(row.get('towers_per_10k_pct'), False)} ({format_metric(row['towers_per_10k'], metric_defs['towers_per_10k']['unit'])})
+                            <br/>❤️ Mortality: {_metric_badge(row.get('u5mr_mean_pct'), True)} ({format_metric(row['u5mr_mean'], metric_defs['u5mr_mean']['unit'])})
+                            <br/>🏥 Access: {_metric_badge(row.get('access_score_pct'), True)}
+                            <br/>📡 Connectivity: {_metric_badge(row.get('towers_per_10k_pct'), False)} ({format_metric(row['towers_per_10k'], metric_defs['towers_per_10k']['unit'])})
                             <br/><em>{_takeaway(row)}</em>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
+                    st.markdown("**Risk signal strength**")
+                    st.progress(_progress_value(row.get("risk_prob_pct"), True))
 
         with st.expander("What am I looking at?"):
-            for metric, info in metric_defs.items():
-                st.markdown(f"**{info['label']}** — {info['description']}")
+            st.markdown("**Under-5 mortality** — Estimated deaths of children under five per 1,000 live births.")
+            st.markdown("**Facilities per 10k** — A quick sense of how many clinics are nearby.")
+            st.markdown("**Towers per 10k** — A proxy for digital connectivity and information access.")
+            st.markdown("**Risk score** — A combined signal of higher mortality and weaker access.")
         with st.expander("Glossary"):
             st.markdown("- **LGA**: Local Government Area, a local administrative zone.")
             st.markdown("- **Proxy**: A stand-in measure when direct data is unavailable.")
@@ -486,6 +575,7 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
             st.markdown("**Legend**")
+            _render_color_legend()
             st.markdown("- 🟩 Better / lower risk")
             st.markdown("- 🟨 Medium")
             st.markdown("- 🟥 Worse / higher risk")
@@ -499,31 +589,51 @@ def main() -> None:
             if lga_options:
                 selected = st.selectbox("Select an LGA", lga_options)
                 detail = explore_filtered[explore_filtered["lga_name"] == selected].iloc[0]
+                national_medians = explore_filtered[
+                    ["u5mr_mean", "facilities_per_10k", "avg_distance_km", "towers_per_10k", "risk_prob"]
+                ].median(numeric_only=True)
                 profile_items = [
-                    ("Under-5 mortality", "u5mr_mean"),
-                    ("Facilities per 10k", "facilities_per_10k"),
-                    ("Average distance to care", "avg_distance_km"),
-                    ("Connectivity towers per 10k", "towers_per_10k"),
-                    ("Combined risk score", "risk_prob"),
+                    ("Under-5 mortality", "u5mr_mean", True),
+                    ("Facilities per 10k", "facilities_per_10k", False),
+                    ("Average distance to care", "avg_distance_km", True),
+                    ("Connectivity towers per 10k", "towers_per_10k", False),
+                    ("Combined risk score", "risk_prob", True),
                 ]
-                for label, key in profile_items:
+                for label, key, higher_is_worse in profile_items:
                     info = metric_defs.get(key, {})
+                    value = detail.get(key)
+                    delta = None
+                    if isinstance(value, (int, float)) and not np.isnan(value):
+                        median = national_medians.get(key)
+                        if isinstance(median, (int, float)) and not np.isnan(median):
+                            delta = value - median
                     st.markdown(
                         f"""
                         <div class="app-card">
                             <strong>{label}</strong>
-                            <div>{format_metric(detail.get(key), info.get("unit", ""))}</div>
+                            <div>{format_metric(value, info.get("unit", ""))}</div>
                             <div class="app-muted">{info.get("description", "Metric description not available.")}</div>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
+                    st.metric(
+                        f"{label} vs median",
+                        format_metric(value, info.get("unit", "")),
+                        delta=f"{delta:+.2f}" if isinstance(delta, (int, float)) else "n/a",
+                        delta_color="inverse" if higher_is_worse else "normal",
+                    )
+                    st.progress(_progress_value(detail.get(f"{key}_pct"), higher_is_worse))
                 render_shap_detail(shap_df, selected, year=year if isinstance(year, int) else None)
             else:
                 st.info("No LGAs match the current filters.")
 
     st.markdown(
         f"<div class='app-muted'>Model version {_get_version_label()} · Data year {year}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='app-muted'>Built as part of ongoing research in health data science.</div>",
         unsafe_allow_html=True,
     )
 
