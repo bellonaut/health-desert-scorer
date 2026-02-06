@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Iterable
+
 import numpy as np
 import pandas as pd
 import pydeck as pdk
@@ -11,6 +13,8 @@ APPLE_COLORS = {
     "green": (52, 199, 89),
     "yellow": (255, 204, 0),
     "red": (255, 59, 48),
+    "gray": (200, 200, 200),
+    "ink": (50, 50, 50),
 }
 
 
@@ -23,24 +27,53 @@ def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t
     ]
 
 
-def risk_to_color(value: float) -> list[int]:
-    if np.isnan(value):
-        return [200, 200, 200]
+def _value_to_color(value: float | None, higher_is_worse: bool) -> list[int]:
+    if value is None or np.isnan(value):
+        return [*APPLE_COLORS["gray"]]
     value = float(np.clip(value, 0.0, 1.0))
+    if not higher_is_worse:
+        value = 1.0 - value
     if value <= 0.5:
         return _interpolate_color(APPLE_COLORS["green"], APPLE_COLORS["yellow"], value / 0.5)
     return _interpolate_color(APPLE_COLORS["yellow"], APPLE_COLORS["red"], (value - 0.5) / 0.5)
 
 
-def render_map(geo_df: pd.DataFrame, color_col: str = "risk_prob") -> None:
-    """Render choropleth map of LGA risk."""
+def _compute_percentile_series(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().sum() == 0:
+        return pd.Series([np.nan] * len(series), index=series.index)
+    return numeric.rank(pct=True)
+
+
+def render_map(
+    geo_df: pd.DataFrame,
+    metric_key: str,
+    metric_label: str,
+    higher_is_worse: bool,
+    highlight_lgas: Iterable[str] | None = None,
+    view_state: pdk.ViewState | None = None,
+) -> None:
+    """Render choropleth map with metric-driven colors and plain-language tooltip."""
 
     styled = geo_df.copy()
-    styled["fill_color"] = (
-        styled[color_col]
-        .fillna(np.nan)
-        .apply(lambda value: risk_to_color(value) + [160])
+    styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
+    styled["fill_color"] = styled["metric_percentile"].apply(
+        lambda value: _value_to_color(value, higher_is_worse) + [170],
     )
+    highlight_set = set(highlight_lgas or [])
+    styled["line_color"] = styled["lga_name"].apply(
+        lambda name: [0, 0, 0, 200] if name in highlight_set else [*APPLE_COLORS["ink"], 140],
+    )
+    styled["line_width"] = styled["lga_name"].apply(lambda name: 2.5 if name in highlight_set else 0.8)
+    def _display_value(value: float | None, digits: int = 2) -> str:
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return "Not available"
+        return f"{float(value):.{digits}f}"
+
+    styled["metric_display"] = styled[metric_key].apply(_display_value)
+    styled["u5mr_display"] = styled["u5mr_mean"].apply(lambda val: _display_value(val, 1))
+    styled["facilities_display"] = styled["facilities_per_10k"].apply(_display_value)
+    styled["towers_display"] = styled["towers_per_10k"].apply(_display_value)
     geojson = styled.to_json()
     layer = pdk.Layer(
         "GeoJsonLayer",
@@ -48,26 +81,35 @@ def render_map(geo_df: pd.DataFrame, color_col: str = "risk_prob") -> None:
         pickable=True,
         auto_highlight=True,
         get_fill_color="properties.fill_color",
-        get_line_color=[50, 50, 50],
-        line_width_min_pixels=0.8,
+        get_line_color="properties.line_color",
+        get_line_width="properties.line_width",
     )
-    view_state = pdk.ViewState(latitude=9.0, longitude=8.7, zoom=5)
+    if view_state is None:
+        view_state = pdk.ViewState(latitude=9.0, longitude=8.7, zoom=5)
+    elif isinstance(view_state, dict):
+        view_state = pdk.ViewState(**view_state)
     tooltip = {
         "html": (
-            "<b>{lga_name}</b>" "<br/>State: {state_name}" "<br/>U5MR: {u5mr_mean}"
-            "<br/>Risk: {risk_prob}"
-            "<br/>Facilities/10k: {facilities_per_10k}"
-            "<br/>Towers/10k: {towers_per_10k}"
-            "<br/>Pop density: {population_density}"
-        )
+            "<b>{lga_name}</b>"
+            "<br/>State: {state_name}"
+            f"<br/>{metric_label}: {{metric_display}}"
+            "<br/>Under-5 mortality: {u5mr_display}"
+            "<br/>Facilities per 10k: {facilities_display}"
+            "<br/>Connectivity towers per 10k: {towers_display}"
+        ),
     }
     st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip))
 
 
 def render_summary_stats(features_df: pd.DataFrame) -> None:
     st.metric("LGAs", len(features_df))
-    st.metric("Avg U5MR", f"{features_df['u5mr_mean'].mean():.1f}")
-    st.metric("Avg Facilities/10k", f"{features_df['facilities_per_10k'].mean():.2f}")
+    u5mr_mean = pd.to_numeric(features_df.get("u5mr_mean"), errors="coerce").mean()
+    facilities_mean = pd.to_numeric(features_df.get("facilities_per_10k"), errors="coerce").mean()
+    st.metric("Avg U5MR", f"{u5mr_mean:.1f}" if not np.isnan(u5mr_mean) else "Not available")
+    st.metric(
+        "Avg Facilities/10k",
+        f"{facilities_mean:.2f}" if not np.isnan(facilities_mean) else "Not available",
+    )
 
 
 def render_shap_detail(shap_df: pd.DataFrame | None, lga_name: str, year: int | None = None) -> None:
