@@ -19,7 +19,7 @@ APPLE_COLORS = {
     "highlight": (0, 0, 0),
 }
 
-MAP_STYLE = "mapbox://styles/mapbox/light-v10"  # white/light basemap
+MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"  # tokenless light basemap
 
 
 def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> list[int]:
@@ -104,14 +104,15 @@ def render_map(
             "<br/>Connectivity towers per 10k: {towers_display}"
         ),
     }
-    st.pydeck_chart(
-        pdk.Deck(
-            layers=[layer],
-            initial_view_state=view_state,
-            tooltip=tooltip,
-            map_style=MAP_STYLE,
+    with st.spinner("Loading map..."):
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip=tooltip,
+                map_style=MAP_STYLE,
+            )
         )
-    )
 
 
 def render_summary_stats(features_df: pd.DataFrame) -> None:
