@@ -10,16 +10,17 @@ import pydeck as pdk
 import streamlit as st
 
 APPLE_COLORS = {
-    # High-contrast palette tuned for dark basemap
-    "green": (10, 170, 60),
-    "yellow": (255, 195, 0),
-    "red": (210, 30, 30),
-    "gray": (180, 180, 180),
-    "ink": (245, 245, 245),        # light outlines on dark map
-    "highlight": (0, 255, 255),    # cyan for selection
+    # High-contrast palette tuned for light basemap
+    "green": (0, 140, 70),
+    "yellow": (255, 190, 0),
+    "red": (214, 40, 57),
+    "gray": (200, 200, 200),
+    "ink": (0, 0, 0),
+    "highlight": (0, 190, 255),  # cyan highlight
 }
 
-MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"  # tokenless dark basemap
+# Tokenless light basemap with minimal visual noise
+MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
 
 
 def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> list[int]:
@@ -61,15 +62,19 @@ def render_map(
     """Render choropleth map with metric-driven colors and plain-language tooltip."""
 
     styled = geo_df.copy()
+    if metric_key not in styled.columns:
+        # Fallback: fill with NaN so we render neutral gray instead of empty map
+        styled[metric_key] = np.nan
+
     styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
     styled["fill_color"] = styled["metric_percentile"].apply(
         lambda value: _value_to_color(value, higher_is_worse) + [255],
     )
     highlight_set = set(highlight_lgas or [])
     styled["line_color"] = styled["lga_name"].apply(
-        lambda name: [*APPLE_COLORS["highlight"], 255] if name in highlight_set else [*APPLE_COLORS["ink"], 220],
+        lambda name: [*APPLE_COLORS["highlight"], 255] if name in highlight_set else [*APPLE_COLORS["ink"], 230],
     )
-    styled["line_width"] = styled["lga_name"].apply(lambda name: 4.0 if name in highlight_set else 2.5)
+    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.5 if name in highlight_set else 2.0)
 
     def _display_value(value: float | None, digits: int = 2) -> str:
         if value is None or (isinstance(value, float) and np.isnan(value)):
