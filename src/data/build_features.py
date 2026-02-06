@@ -346,6 +346,18 @@ def build_features(
                 np.nan,
             )
 
+    # Access score: blend (higher distance = worse) and (lower facilities_per_10k = worse)
+    def _pct_rank(series: pd.Series) -> pd.Series:
+        numeric = pd.to_numeric(series, errors="coerce")
+        return numeric.rank(pct=True)
+
+    facilities_pct = _pct_rank(features.get("facilities_per_10k", np.nan))
+    distance_pct = _pct_rank(features.get("avg_distance_km", np.nan))
+    if distance_pct.notna().sum() == 0:
+        features["access_score"] = 1 - facilities_pct
+    else:
+        features["access_score"] = (1 - facilities_pct + distance_pct) / 2
+
     ordered_cols = [
         "lga_uid",
         "lga_name",
@@ -364,6 +376,7 @@ def build_features(
         "urban_prop",
         "population",
         "population_density",
+        "access_score",
         "towers_count",
         "tower_density_per_km2",
         "avg_dist_to_tower_km",
