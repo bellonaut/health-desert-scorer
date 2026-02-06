@@ -10,6 +10,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.config import (
+    AVG_DISTANCE_KM_MAX,
+    COVERAGE_KM_DEFAULT,
+    MIN_LGA_COUNT,
+    POPULATION_MERGE_COVERAGE_MIN,
+)
 from src.data.spatial_ops import (
     CRS,
     aggregate_facility_metrics_by_lga,
@@ -97,10 +103,10 @@ def _validate_features(df: pd.DataFrame) -> None:
     dup_lga_names = dup_lga_names[dup_lga_names > 1]
     if not dup_lga_names.empty:
         logging.info("Found %d duplicated lga_name values; top: %s", len(dup_lga_names), dup_lga_names.head(10).to_dict())
-    if len(df) < 500:
+    if len(df) < MIN_LGA_COUNT:
         logging.warning("Row count (%d) below expected Nigeria LGA count.", len(df))
-    if not df["avg_distance_km"].between(0, 200).all():
-        raise ValueError("avg_distance_km values out of expected range 0-200 km.")
+    if not df["avg_distance_km"].between(0, AVG_DISTANCE_KM_MAX).all():
+        raise ValueError(f"avg_distance_km values out of expected range 0-{AVG_DISTANCE_KM_MAX} km.")
     if (df["facilities_per_10k"] < 0).any():
         raise ValueError("facilities_per_10k contains negative values.")
     labeled = df["u5mr_mean"].notna().sum()
@@ -324,7 +330,7 @@ def build_features(
             max_pop if pd.notna(max_pop) else float("nan"),
             zero_pop,
         )
-        if coverage < 0.98:
+        if coverage < POPULATION_MERGE_COVERAGE_MIN:
             raise ValueError(
                 f"Population merge coverage too low: {coverage:.1%}. "
                 f"Sample unmatched keys: {unmatched_keys}"
@@ -420,7 +426,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opencellid", type=Path, default=Path("data/raw/opencellid.csv.gz"))
     parser.add_argument("--output", type=Path, default=Path("data/processed/lga_features.csv"))
     parser.add_argument("--report", type=Path, default=Path("docs/build_features_report.json"))
-    parser.add_argument("--coverage-km", type=float, default=5.0)
+    parser.add_argument("--coverage-km", type=float, default=COVERAGE_KM_DEFAULT)
     parser.add_argument("--lga-col", type=str, default=None, help="Override LGA column name in boundary file.")
     parser.add_argument("--state-col", type=str, default=None, help="Override state column name in boundary file.")
     parser.add_argument("--pop-lga-col", type=str, default=None, help="Override LGA column in population file.")

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.config import AVG_DISTANCE_KM_MAX
 
 @pytest.mark.parametrize(
     "path",
@@ -28,7 +29,7 @@ def test_feature_ranges() -> None:
     if not path.exists():
         pytest.skip("Features missing; run pipeline first.")
     df = pd.read_csv(path)
-    assert (df["avg_distance_km"].between(0, 200)).all()
+    assert (df["avg_distance_km"].between(0, AVG_DISTANCE_KM_MAX)).all()
     assert (df["facilities_per_10k"].fillna(0) >= 0).all()
 
 
