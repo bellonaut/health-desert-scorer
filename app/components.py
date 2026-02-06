@@ -63,13 +63,13 @@ def render_map(
     styled = geo_df.copy()
     styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
     styled["fill_color"] = styled["metric_percentile"].apply(
-        lambda value: _value_to_color(value, higher_is_worse) + [240],
+        lambda value: _value_to_color(value, higher_is_worse) + [255],
     )
     highlight_set = set(highlight_lgas or [])
     styled["line_color"] = styled["lga_name"].apply(
         lambda name: [*APPLE_COLORS["highlight"], 255] if name in highlight_set else [*APPLE_COLORS["ink"], 255],
     )
-    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.0 if name in highlight_set else 2.0)
+    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.5 if name in highlight_set else 2.5)
 
     def _display_value(value: float | None, digits: int = 2) -> str:
         if value is None or (isinstance(value, float) and np.isnan(value)):
