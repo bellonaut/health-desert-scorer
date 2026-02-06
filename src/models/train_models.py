@@ -103,6 +103,7 @@ def _plot_curves(y_true: np.ndarray, y_prob: np.ndarray, out_dir: Path) -> None:
 
 def train_models(features_path: Path) -> None:
     df = _load_features(features_path)
+    year_col = df["year"] if "year" in df.columns else None
     df["high_risk"] = df["u5mr_mean"] > df["u5mr_mean"].median()
     if df["high_risk"].nunique() < 2:
         raise ValueError("Need at least two classes for training.")
@@ -147,6 +148,7 @@ def train_models(features_path: Path) -> None:
     predictions = pd.DataFrame(
         {
             "lga_name": df["lga_name"],
+            "year": year_col if year_col is not None else 2018,
             "risk_prob": risk_prob,
             "risk_label": (risk_prob >= 0.5).astype(int),
             "fold": folds,
@@ -175,6 +177,8 @@ def train_models(features_path: Path) -> None:
         shap_values = explainer.shap_values(X)
         shap_df = pd.DataFrame(shap_values, columns=feature_cols)
         shap_df.insert(0, "lga_name", df["lga_name"].values)
+        if year_col is not None:
+            shap_df.insert(1, "year", year_col.values)
         shap_df.to_csv("data/processed/shap_values.csv", index=False)
 
         shap.summary_plot(shap_values, X, plot_type="bar", show=False)
