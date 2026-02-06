@@ -85,7 +85,8 @@ def render_map(
     styled["u5mr_display"] = styled["u5mr_mean"].apply(lambda val: _display_value(val, 1))
     styled["facilities_display"] = styled["facilities_per_10k"].apply(_display_value)
     styled["towers_display"] = styled["towers_per_10k"].apply(_display_value)
-    geojson = styled.to_json()
+    # Use GeoInterface dict (safer than JSON string for pydeck property access)
+    geojson = styled.__geo_interface__
     layer = pdk.Layer(
         "GeoJsonLayer",
         geojson,
