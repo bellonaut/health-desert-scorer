@@ -541,9 +541,8 @@ def aggregate_tower_metrics_by_lga(
     counts = counts.reindex(lgas["lga_uid"]).fillna(0).astype(int)
 
     # Distances to nearest tower
-    lgas_centroids = lgas.copy()
+    lgas_centroids = lgas.to_crs(CRS.metric).copy()
     lgas_centroids["geometry"] = lgas_centroids.geometry.centroid
-    lgas_centroids = lgas_centroids.to_crs(CRS.metric)
     towers_metric = towers.to_crs(CRS.metric)
 
     if towers_metric.empty:

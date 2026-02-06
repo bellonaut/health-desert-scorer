@@ -240,6 +240,48 @@ def build_features(
     if tower_metrics is not None:
         features = features.merge(tower_metrics, on="lga_uid", how="left")
 
+    # Fallbacks to eliminate gaps (common when a polygon has no DHS clusters)
+    # 1) lat/lon from LGA centroid when cluster-derived coords are missing
+    lga_centroids = lgas[["lga_uid", "geometry"]].copy().to_crs(CRS.metric)
+    lga_centroids["centroid_geom"] = lga_centroids.geometry.centroid
+    lga_centroids = lga_centroids.set_geometry("centroid_geom").to_crs(CRS.wgs84)
+    lga_centroids["lga_lat_centroid"] = lga_centroids.geometry.y
+    lga_centroids["lga_lon_centroid"] = lga_centroids.geometry.x
+    features = features.merge(
+        lga_centroids[["lga_uid", "lga_lat_centroid", "lga_lon_centroid"]],
+        on="lga_uid",
+        how="left",
+    )
+    for col, cent_col in [("lga_lat", "lga_lat_centroid"), ("lga_lon", "lga_lon_centroid")]:
+        if col in features:
+            features[col] = features[col].fillna(features[cent_col])
+    features = features.drop(columns=["lga_lat_centroid", "lga_lon_centroid"])
+
+    # 2) Impute u5mr/urban_prop by state, then national
+    def _impute_by_state(df: pd.DataFrame, col: str, func: str = "median"):
+        state_stat = df.groupby("state_name")[col].transform(func)
+        overall = getattr(df[col], func)()
+        return df[col].fillna(state_stat).fillna(overall)
+
+    for col, func in [("u5mr_mean", "mean"), ("u5mr_median", "median"), ("urban_prop", "mean")]:
+        if col in features:
+            features[col] = _impute_by_state(features, col, func)
+
+    # 3) Birth/death counts: set missing to 0 (no observed DHS births)
+    for col in ["live_births_sum", "u5_deaths_sum"]:
+        if col in features:
+            features[col] = features[col].fillna(0)
+
+    # 4) Tower metrics: if towers were absent, ensure columns exist and fill with zeros
+    if tower_metrics is None:
+        features["towers_count"] = 0
+        features["tower_density_per_km2"] = 0.0
+        features["avg_dist_to_tower_km"] = np.nan
+    else:
+        for col in ["towers_count", "tower_density_per_km2", "avg_dist_to_tower_km"]:
+            if col in features:
+                features[col] = features[col].fillna(0 if "count" in col or "density" in col else np.nan)
+
     # Area in km^2 for density
     lga_area = lgas[["lga_uid", "geometry"]].copy()
     lga_area = lga_area.to_crs(CRS.metric)
