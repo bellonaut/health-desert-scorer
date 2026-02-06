@@ -10,12 +10,15 @@ import pydeck as pdk
 import streamlit as st
 
 APPLE_COLORS = {
-    "green": (52, 199, 89),
-    "yellow": (255, 204, 0),
-    "red": (255, 59, 48),
-    "gray": (200, 200, 200),
-    "ink": (50, 50, 50),
+    "green": (61, 171, 116),
+    "yellow": (247, 197, 72),
+    "red": (225, 94, 84),
+    "gray": (210, 210, 210),
+    "ink": (55, 68, 80),
+    "highlight": (0, 140, 143),
 }
+
+MAP_STYLE = "mapbox://styles/mapbox/light-v10"
 
 
 def _interpolate_color(start: tuple[int, int, int], end: tuple[int, int, int], t: float) -> list[int]:
@@ -59,13 +62,14 @@ def render_map(
     styled = geo_df.copy()
     styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
     styled["fill_color"] = styled["metric_percentile"].apply(
-        lambda value: _value_to_color(value, higher_is_worse) + [170],
+        lambda value: _value_to_color(value, higher_is_worse) + [160],
     )
     highlight_set = set(highlight_lgas or [])
     styled["line_color"] = styled["lga_name"].apply(
-        lambda name: [0, 0, 0, 200] if name in highlight_set else [*APPLE_COLORS["ink"], 140],
+        lambda name: [*APPLE_COLORS["highlight"], 220] if name in highlight_set else [*APPLE_COLORS["ink"], 160],
     )
     styled["line_width"] = styled["lga_name"].apply(lambda name: 2.5 if name in highlight_set else 0.8)
+
     def _display_value(value: float | None, digits: int = 2) -> str:
         if value is None or (isinstance(value, float) and np.isnan(value)):
             return "Not available"
@@ -99,7 +103,14 @@ def render_map(
             "<br/>Connectivity towers per 10k: {towers_display}"
         ),
     }
-    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip))
+    st.pydeck_chart(
+        pdk.Deck(
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip=tooltip,
+            map_style=MAP_STYLE,
+        )
+    )
 
 
 def render_summary_stats(features_df: pd.DataFrame) -> None:
