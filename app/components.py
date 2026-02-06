@@ -10,12 +10,12 @@ import pydeck as pdk
 import streamlit as st
 
 APPLE_COLORS = {
-    # High-contrast palette for light basemap
-    "green": (32, 168, 84),
-    "yellow": (255, 193, 7),
-    "red": (220, 53, 69),
-    "gray": (200, 200, 200),
-    "ink": (25, 25, 25),
+    # Saturated palette for strong contrast on light basemap
+    "green": (0, 153, 68),
+    "yellow": (255, 200, 0),
+    "red": (214, 40, 57),
+    "gray": (190, 190, 190),
+    "ink": (0, 0, 0),
     "highlight": (0, 0, 0),
 }
 
@@ -63,13 +63,13 @@ def render_map(
     styled = geo_df.copy()
     styled["metric_percentile"] = _compute_percentile_series(styled[metric_key])
     styled["fill_color"] = styled["metric_percentile"].apply(
-        lambda value: _value_to_color(value, higher_is_worse) + [200],
+        lambda value: _value_to_color(value, higher_is_worse) + [240],
     )
     highlight_set = set(highlight_lgas or [])
     styled["line_color"] = styled["lga_name"].apply(
-        lambda name: [*APPLE_COLORS["highlight"], 240] if name in highlight_set else [*APPLE_COLORS["ink"], 220],
+        lambda name: [*APPLE_COLORS["highlight"], 255] if name in highlight_set else [*APPLE_COLORS["ink"], 255],
     )
-    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.0 if name in highlight_set else 1.4)
+    styled["line_width"] = styled["lga_name"].apply(lambda name: 3.0 if name in highlight_set else 2.0)
 
     def _display_value(value: float | None, digits: int = 2) -> str:
         if value is None or (isinstance(value, float) and np.isnan(value)):
@@ -86,9 +86,14 @@ def render_map(
         geojson,
         pickable=True,
         auto_highlight=True,
+        stroked=True,
+        filled=True,
         get_fill_color="properties.fill_color",
         get_line_color="properties.line_color",
         get_line_width="properties.line_width",
+        lineWidthUnits="pixels",
+        lineWidthScale=1,
+        lineWidthMinPixels=1.5,
     )
     if view_state is None:
         view_state = pdk.ViewState(latitude=9.0, longitude=8.7, zoom=5)
