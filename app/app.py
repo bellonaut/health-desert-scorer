@@ -241,16 +241,19 @@ def _takeaway(row: pd.Series) -> str:
     access_score = row.get("access_score_pct")
     statements = []
     if u5 is not None and u5 >= 0.66:
-        statements.append("High mortality")
-    if towers is not None and towers <= 0.33:
-        statements.append("Low connectivity")
+        statements.append("high mortality")
     if access_score is not None and access_score >= 0.66:
-        statements.append("Weak access to care")
+        statements.append("limited access to care")
     elif facilities is not None and facilities <= 0.33:
-        statements.append("Few facilities")
+        statements.append("few nearby facilities")
+    if towers is not None and towers <= 0.33:
+        statements.append("low connectivity")
     if not statements:
         return "Mixed signals across mortality, access, and connectivity."
-    return f"{' + '.join(statements)}: likely underserved."
+    if len(statements) == 1:
+        return f"{statements[0].capitalize()} suggests a localized risk signal."
+    combo = " + ".join(statements[:2])
+    return f"{combo.capitalize()} suggests an underserved area."
 
 
 def _progress_value(value_pct: float | None, higher_is_worse: bool) -> float:
@@ -262,19 +265,60 @@ def _progress_value(value_pct: float | None, higher_is_worse: bool) -> float:
     return float(np.clip(value, 0.0, 1.0))
 
 
-def _render_color_legend() -> None:
+def _render_color_legend(smooth_gradient: bool) -> None:
+    gradient = (
+        "linear-gradient(90deg,#4A9676,#E7C474,#D67A6E)"
+        if smooth_gradient
+        else "linear-gradient(90deg,#4A9676 0%,#4A9676 33%,#E7C474 33%,#E7C474 66%,#D67A6E 66%,#D67A6E 100%)"
+    )
     st.markdown(
-        """
+        f"""
         <div style="margin-top:0.5rem;margin-bottom:0.5rem;">
             <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:0.85rem;color:#4b4b4b;">Better</span>
-                <div style="flex:1;height:10px;border-radius:6px;background:linear-gradient(90deg,#3DAB74,#F7C548,#E15E54);"></div>
+                <div style="flex:1;height:10px;border-radius:6px;background:{gradient};"></div>
                 <span style="font-size:0.85rem;color:#4b4b4b;">Worse</span>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _percentile_label(value_pct: float | None) -> str:
+    if value_pct is None or np.isnan(value_pct):
+        return "Percentile not available"
+    value_pct = float(np.clip(value_pct, 0.0, 1.0))
+    if value_pct >= 0.5:
+        return f"Top {int(round((1 - value_pct) * 100))}% nationally"
+    return f"Bottom {int(round(value_pct * 100))}% nationally"
+
+
+def _uncertainty_label(row: pd.Series) -> str:
+    metrics = ["u5mr_mean", "facilities_per_10k", "avg_distance_km", "towers_per_10k", "risk_prob"]
+    missing = sum(
+        1 for metric in metrics if row.get(metric) is None or (isinstance(row.get(metric), float) and np.isnan(row.get(metric)))
+    )
+    if missing == 0:
+        return "Data completeness: High"
+    if missing <= 2:
+        return "Data completeness: Medium"
+    return "Data completeness: Low"
+
+
+def _insight_of_day(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "Today’s insight: No data available for this year."
+    candidates = df[
+        (df.get("u5mr_mean_pct", 0) >= 0.75)
+        & (df.get("facilities_per_10k_pct", 1) <= 0.25)
+    ]
+    if not candidates.empty:
+        top_state = candidates["state_name"].mode().iloc[0]
+        return f"Today’s insight: Several LGAs in {top_state} show high mortality and limited facility density."
+    fallback = df.sort_values("risk_prob", ascending=False).head(5)
+    top_state = fallback["state_name"].mode().iloc[0]
+    return f"Today’s insight: High combined risk clusters appear in {top_state}."
 
 
 def _get_view_state(filtered: gpd.GeoDataFrame, selected_lgas: list[str]) -> object | None:
@@ -326,8 +370,7 @@ def main() -> None:
         <div class="app-hero">
             <h1>Nigeria Health Desert Risk Scorer</h1>
             <div class="app-muted">
-                A research-grade view of where <span>child mortality</span>, <span>healthcare access</span>, and
-                <span>digital connectivity</span> overlap.
+                An exploratory research tool for understanding health access patterns.
             </div>
         </div>
         """,
@@ -350,6 +393,7 @@ def main() -> None:
             st.markdown("**Step 1 → Choose what you want to explore**")
             st.markdown("**Step 2 → Click a hotspot suggestion**")
             st.markdown("**Step 3 → Compare places side by side**")
+            st.markdown("_Try clicking **Show me the highest-risk areas** to begin._")
             if st.button("Got it — explore"):
                 st.session_state["onboarding_seen"] = True
 
@@ -362,6 +406,18 @@ def main() -> None:
     years = sorted(merged["year"].dropna().unique().tolist())
     year = st.radio("Year", years, horizontal=True)
     filtered = merged[merged["year"] == year]
+
+    view_mode = st.radio("View mode", ["Basic view", "Research view"], horizontal=True)
+    research_view = view_mode == "Research view"
+
+    st.markdown(
+        f"""
+        <div class="app-card" style="margin-bottom:1rem;">
+            <div class="app-muted">{_insight_of_day(filtered)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     guided_tab, explore_tab = st.tabs(["Guided Tour (Recommended)", "Explore Freely"])
 
@@ -424,7 +480,7 @@ def main() -> None:
         guided_metric_key = guided_metric_map[guided_metric_choice]
 
         st.markdown("### Step 2: Find a hotspot")
-        hotspot_cols = st.columns(4)
+        hotspot_cols = st.columns(3)
         with hotspot_cols[0]:
             if st.button("Show me the highest-risk areas"):
                 with st.spinner("Finding areas with highest risk…"):
@@ -449,7 +505,53 @@ def main() -> None:
                     filtered.sort_values("access_score", ascending=False)["lga_name"].head(4).tolist()
                 )
                 st.session_state["guided_last_action"] = "Weak access to care"
-        with hotspot_cols[3]:
+        hotspot_cols_secondary = st.columns(3)
+        with hotspot_cols_secondary[0]:
+            if st.button("Show most unequal regions"):
+                with st.spinner("Scanning for uneven outcomes…"):
+                    time.sleep(0.2)
+                uneven = filtered.assign(
+                    inequality_score=(
+                        filtered["u5mr_mean_pct"].fillna(0)
+                        + (1 - filtered["facilities_per_10k_pct"].fillna(0))
+                        + (1 - filtered["towers_per_10k_pct"].fillna(0))
+                    )
+                ).sort_values("inequality_score", ascending=False)
+                st.session_state["guided_selected_lgas"] = uneven["lga_name"].head(4).tolist()
+                st.session_state["guided_last_action"] = "Most unequal regions"
+        with hotspot_cols_secondary[1]:
+            if st.button("High mortality + good access"):
+                with st.spinner("Finding mismatched signals…"):
+                    time.sleep(0.2)
+                mismatch = filtered[
+                    (filtered["u5mr_mean_pct"] >= 0.75) & (filtered["access_score_pct"] <= 0.4)
+                ]
+                st.session_state["guided_selected_lgas"] = mismatch["lga_name"].head(4).tolist()
+                st.session_state["guided_last_action"] = "High mortality but better access"
+        with hotspot_cols_secondary[2]:
+            if st.button("Low mortality + poor connectivity"):
+                with st.spinner("Finding quiet gaps…"):
+                    time.sleep(0.2)
+                mismatch = filtered[
+                    (filtered["u5mr_mean_pct"] <= 0.3) & (filtered["towers_per_10k_pct"] <= 0.3)
+                ]
+                st.session_state["guided_selected_lgas"] = mismatch["lga_name"].head(4).tolist()
+                st.session_state["guided_last_action"] = "Low mortality but low connectivity"
+
+        hotspot_cols_tertiary = st.columns(2)
+        with hotspot_cols_tertiary[0]:
+            if st.button("Show surprising outliers"):
+                with st.spinner("Looking for unexpected patterns…"):
+                    time.sleep(0.2)
+                outliers = filtered.assign(
+                    surprise_score=(
+                        (filtered["u5mr_mean_pct"] - filtered["access_score_pct"]).abs().fillna(0)
+                        + (filtered["u5mr_mean_pct"] - filtered["towers_per_10k_pct"]).abs().fillna(0)
+                    )
+                ).sort_values("surprise_score", ascending=False)
+                st.session_state["guided_selected_lgas"] = outliers["lga_name"].head(4).tolist()
+                st.session_state["guided_last_action"] = "Surprising outliers"
+        with hotspot_cols_tertiary[1]:
             if st.button("Surprise me (random example)"):
                 if len(filtered) == 0:
                     st.warning("No LGAs available to sample.")
@@ -458,6 +560,7 @@ def main() -> None:
                         time.sleep(0.2)
                     st.session_state["guided_selected_lgas"] = filtered.sample(min(3, len(filtered)))["lga_name"].tolist()
                     st.session_state["guided_last_action"] = "Surprise example"
+                    st.toast("Surprise set loaded.")
 
         if st.session_state.get("guided_last_action"):
             st.success(f"{st.session_state['guided_last_action']} loaded. Compare them below.")
@@ -468,6 +571,7 @@ def main() -> None:
         map_cols = st.columns([2.3, 1])
         with map_cols[0]:
             metric_info = metric_defs.get(guided_metric_key, {})
+            smooth_gradient = st.toggle("Smooth gradient", value=True, key="guided-smooth-gradient")
             render_map(
                 filtered,
                 metric_key=guided_metric_key,
@@ -475,6 +579,7 @@ def main() -> None:
                 higher_is_worse=bool(metric_info.get("higher_is_worse", True)),
                 highlight_lgas=selected_lgas,
                 view_state=view_state,
+                smooth_gradient=smooth_gradient,
             )
             st.markdown(
                 "<div class='app-muted'>Green = better outcomes · Red = worse outcomes. "
@@ -483,7 +588,7 @@ def main() -> None:
             )
         with map_cols[1]:
             st.markdown("**Legend**")
-            _render_color_legend()
+            _render_color_legend(smooth_gradient)
             st.markdown("- 🟩 Better / lower risk")
             st.markdown("- 🟨 Medium")
             st.markdown("- 🟥 Worse / higher risk")
@@ -525,14 +630,46 @@ def main() -> None:
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.markdown("**Risk signal strength**")
-                    st.progress(_progress_value(row.get("risk_prob_pct"), True))
+                    st.markdown("**Progress vs national distribution**")
+                    st.metric(
+                        "Mortality position",
+                        format_metric(row.get("u5mr_mean"), metric_defs["u5mr_mean"]["unit"]),
+                        _percentile_label(row.get("u5mr_mean_pct")),
+                    )
+                    st.progress(_progress_value(row.get("u5mr_mean_pct"), True))
+                    st.metric(
+                        "Access position",
+                        format_metric(row.get("access_score"), metric_defs["access_score"]["unit"]),
+                        _percentile_label(row.get("access_score_pct")),
+                    )
+                    st.progress(_progress_value(row.get("access_score_pct"), True))
+                    st.metric(
+                        "Connectivity position",
+                        format_metric(row.get("towers_per_10k"), metric_defs["towers_per_10k"]["unit"]),
+                        _percentile_label(row.get("towers_per_10k_pct")),
+                    )
+                    st.progress(_progress_value(row.get("towers_per_10k_pct"), False))
+                    if research_view:
+                        st.caption(_uncertainty_label(row))
+
+            st.success("Comparison ready.")
 
         with st.expander("What am I looking at?"):
-            st.markdown("**Under-5 mortality** — Estimated deaths of children under five per 1,000 live births.")
-            st.markdown("**Facilities per 10k** — A quick sense of how many clinics are nearby.")
-            st.markdown("**Towers per 10k** — A proxy for digital connectivity and information access.")
-            st.markdown("**Risk score** — A combined signal of higher mortality and weaker access.")
+            st.markdown(
+                "**Under-5 mortality** — Estimated deaths of children under five per 1,000 live births."
+            )
+            st.markdown(
+                "**Facilities per 10k** — The number of health facilities per 10,000 people, indicating access."
+            )
+            st.markdown(
+                "**Average distance to care** — Typical travel distance to the nearest facility; longer suggests weaker access."
+            )
+            st.markdown(
+                "**Towers per 10k** — A proxy for digital connectivity and the ability to reach services."
+            )
+            st.markdown(
+                "**Risk score** — A combined signal of higher mortality with weaker access and connectivity."
+            )
         with st.expander("Glossary"):
             st.markdown("- **LGA**: Local Government Area, a local administrative zone.")
             st.markdown("- **Proxy**: A stand-in measure when direct data is unavailable.")
@@ -580,19 +717,21 @@ def main() -> None:
         metric_info = metric_defs[metric_key]
 
         with left:
+            smooth_gradient = st.toggle("Smooth gradient", value=True, key="explore-smooth-gradient")
             render_map(
                 explore_filtered,
                 metric_key=metric_key,
                 metric_label=str(metric_info["label"]),
                 higher_is_worse=bool(metric_info["higher_is_worse"]),
                 highlight_lgas=highlight_lgas,
+                smooth_gradient=smooth_gradient,
             )
             st.markdown(
                 "<div class='app-muted'>Outlined areas are in the top highlight band.</div>",
                 unsafe_allow_html=True,
             )
             st.markdown("**Legend**")
-            _render_color_legend()
+            _render_color_legend(smooth_gradient)
             st.markdown("- 🟩 Better / lower risk")
             st.markdown("- 🟨 Medium")
             st.markdown("- 🟥 Worse / higher risk")
@@ -641,6 +780,20 @@ def main() -> None:
                         delta_color="inverse" if higher_is_worse else "normal",
                     )
                     st.progress(_progress_value(detail.get(f"{key}_pct"), higher_is_worse))
+                if research_view:
+                    with st.expander("Research details"):
+                        st.dataframe(
+                            detail[
+                                [
+                                    "u5mr_mean",
+                                    "facilities_per_10k",
+                                    "avg_distance_km",
+                                    "towers_per_10k",
+                                    "risk_prob",
+                                ]
+                            ].to_frame(name="Value")
+                        )
+                        st.caption(_uncertainty_label(detail))
                 render_shap_detail(shap_df, selected, year=year if isinstance(year, int) else None)
             else:
                 st.info("No LGAs match the current filters.")
