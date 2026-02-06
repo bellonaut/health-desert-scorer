@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+import sys
 
 import numpy as np
 
 import geopandas as gpd
 import pandas as pd
 import streamlit as st
+
+# Ensure app directory is importable when Streamlit launches from project root.
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 from components import render_map, render_shap_detail, render_summary_stats
 
@@ -22,6 +28,25 @@ def load_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame | None]:
     shap_path = Path("data/processed/shap_values.csv")
 
     lgas = gpd.read_file(lga_path)
+    # Normalize column names from common alternatives
+    rename_map: dict[str, str] = {}
+    if "lga_name" not in lgas.columns:
+        for cand in ["lganame", "lga", "adm2_name", "name", "lg_name", "NAME_2"]:
+            if cand in lgas.columns:
+                rename_map[cand] = "lga_name"
+                break
+    if "state_name" not in lgas.columns:
+        for cand in ["statename", "state", "adm1_name", "NAME_1"]:
+            if cand in lgas.columns:
+                rename_map[cand] = "state_name"
+                break
+    if rename_map:
+        lgas = lgas.rename(columns=rename_map)
+    if "lga_name" not in lgas.columns:
+        raise KeyError("Could not find LGA name column in boundaries (tried lganame/lga/adm2/name).")
+    lgas["lga_name"] = lgas["lga_name"].astype(str).str.strip()
+    if "state_name" in lgas:
+        lgas["state_name"] = lgas["state_name"].astype(str).str.strip()
     features = pd.read_csv(features_path)
     preds = pd.read_csv(preds_path)
     shap_df = pd.read_csv(shap_path) if shap_path.exists() else None
