@@ -2,7 +2,7 @@
 
 Nigeria faces preventable mortality partly because people cannot reach care in time. This project is an evolving research prototype that links maternal/child health outcomes with geographic access, facility density, and basic connectivity to identify LGAs at elevated risk of “health deserts.” It is part of my MSc Data Science work, designed to translate public health intelligence into decision-support signals while remaining grounded in the realities of data quality, displacement, and infrastructure variability. The goal is not a deployed system—it is a research-grade foundation for understanding where distance, scarcity, and connectivity intersect.
 
-> This is a research-driven prototype, not an operational tool. DHS microdata must **never** be committed; only aggregated LGA-level outputs belong in `data/processed/`. DHS cluster locations are displaced and this pipeline respects that by operating on aggregated outputs only.
+> This is a research-driven prototype, not an operational tool. DHS microdata and cluster coordinates must **never** be committed; only aggregated LGA-level outputs belong in `data/processed/`. DHS cluster locations are displaced and this pipeline respects that by operating on aggregated outputs only.
 
 ---
 
@@ -24,7 +24,7 @@ This project constructs LGA-level features from population, facility, and connec
 ---
 
 ### Data Sources
-- **DHS (with approval)** — aggregated outcomes derived from DHS microdata (approval PDF included in repo).
+- **DHS (with approval)** — aggregated outcomes derived from DHS microdata (approval documentation is kept private and is not part of this repository).
 - **WorldPop** — population density and distribution.
 - **GRID3 / facility data** — health facility locations and basic attributes.
 - **OpenCellID** — proxy measures for connectivity and coverage.
@@ -39,6 +39,10 @@ This project constructs LGA-level features from population, facility, and connec
 - **Aggregated data only**: no individual-level or personally identifiable information.
 - **Not clinical guidance**: outputs are for planning and research use.
 - **Early-stage prototype**: methods and assumptions are evolving; results must be validated.
+
+### Data Handling & Privacy
+- **No restricted data in repo**: DHS approval documentation, microdata, and cluster coordinates are intentionally excluded.
+- **Storage guidance**: place any restricted inputs locally under `data/raw/` and keep them out of version control.
 
 ---
 
