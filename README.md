@@ -111,6 +111,27 @@ This project shows that I approach data science as a systems problem: combining 
 
 ### Run instructions
 
+### Shippable quickstart (Mac/Linux)
+
+> This script sets up a local virtualenv, downloads the open datasets, builds features, trains models, and launches the Streamlit app.
+
+```bash
+./scripts/run_demo.sh
+```
+
+### Windows quickstart
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python scripts\create_mock_dhs.py
+python scripts\download_open_data.py
+python -m src.data.build_features
+python -m src.models.train_models
+streamlit run app\app.py
+```
+
 1. **Create mock DHS clusters (optional for demo data)**
    ```bash
    python scripts/create_mock_dhs.py
