@@ -13,3 +13,9 @@ models/
 *.pdf
 .DS_Store
 logs/
+
+# Allow minimal demo data for Streamlit Cloud
+!data/raw/
+!data/raw/lga_boundaries.geojson
+!data/processed/lga_features.csv
+!data/processed/lga_predictions.csv
