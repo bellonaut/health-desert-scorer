@@ -51,11 +51,6 @@ I built this as a systems-thinking exercise in health equity: to link infrastruc
 
 ---
 
-### LinkedIn Feature Description
-**Headline:** Nigeria Health Desert Risk Scorer — applied ML for public health access risk
-
-**Description:** A research-grade prototype from my MSc Data Science work that combines DHS outcomes with geospatial access and connectivity indicators to surface LGAs at elevated health-access risk. It is designed for decision-support exploration, not deployment, with an emphasis on transparency and policy relevance.
-
 **Impact highlights:**
 - Aggregates DHS-derived signals into LGA-level risk features with displacement-aware handling.
 - Combines interpretable models and boosted trees for robust, explainable baselines.
@@ -83,33 +78,10 @@ I built this as a systems-thinking exercise in health equity: to link infrastruc
 
 ---
 
-### Proof Assets to Add (Credibility Boosters)
-1. **Short demo video** — shows the end-to-end pipeline and map exploration in action.
-2. **ROC/PR curves** — demonstrates model behavior without overstating performance.
-3. **Feature importance plots** — validates that access variables drive risk signals.
-4. **Example LGA insights** — a mini case study showing why a specific LGA scores high.
-5. **App screenshots** — communicates a real, working prototype and its interface.
-
 ---
 
 ### Portfolio Positioning Statement
 This project shows that I approach data science as a systems problem: combining geospatial data engineering, interpretable modeling, and policy-aware framing to address health equity. It reflects research depth, technical rigor, and a commitment to building decision-support tools that are honest about limitations yet useful for real-world planning.
-
----
-
-### Portfolio Checklist (10 Practical Steps)
-1. Add a short demo video showing data ingestion, modeling, and app exploration.
-2. Publish a compact model card with inputs, outputs, and limitations.
-3. Include a “results snapshot” page with 2–3 validated insights and caveats.
-4. Add ROC/PR curves and calibration plots with plain-language interpretation.
-5. Show a feature importance chart that ties results to access constraints.
-6. Document data provenance and access limitations (including DHS approval).
-7. Add a short “methods & assumptions” section for spatial aggregation decisions.
-8. Include a reproducible run script and pinned dependencies for reproducibility.
-9. Provide a sample policy brief (1–2 pages) summarizing implications.
-10. Add screenshots of the Streamlit interface and map outputs.
-
----
 
 > Recommended Python: 3.11 or 3.12 on Windows for geospatial dependencies.
 
