@@ -1,15 +1,15 @@
-geopandas==0.14.4
-shapely==2.0.4
-fiona==1.9.6
-pyproj==3.6.1
-pyogrio==0.7.2
+geopandas==1.1.1
+shapely==2.1.2
+fiona==1.10.1
+pyproj==3.7.2
+pyogrio==0.11.1
 
 joblib==1.4.2
-matplotlib==3.8.4
-numpy==1.26.4
-pandas==2.2.2
+matplotlib==3.10.8
+numpy==2.1.1
+pandas==2.3.0
 pydeck==0.8.1b0
 requests==2.31.0
-scikit-learn==1.4.2
+scikit-learn==1.8.0
 streamlit==1.33.0
-xgboost==2.0.3
+xgboost==3.1.3
