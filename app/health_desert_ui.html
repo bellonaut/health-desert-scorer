@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nigeria Health Desert Risk Scorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #171b26;
+    --surface2: #1e2333;
+    --border: rgba(255,255,255,0.07);
+    --text: #e8eaf0;
+    --text-muted: #6b7280;
+    --text-dim: #3d4455;
+    --accent: #f97316;
+    --accent-soft: rgba(249,115,22,0.12);
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --green-soft: rgba(34,197,94,0.15);
+    --yellow-soft: rgba(234,179,8,0.15);
+    --red-soft: rgba(239,68,68,0.15);
+    --panel-w: 360px;
+    --header-h: 56px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100vw;
+    height: 100vh;
+  }
+
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-shell {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    height: var(--header-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    position: relative;
+    z-index: 100;
+    flex-shrink: 0;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .logo span { color: var(--accent); }
+
+  .header-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+  }
+
+  /* State selector */
+  .state-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  }
+  .state-select, .year-select {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .state-select option, .year-select option { color: #111827; }
+  .pill-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(249,115,22,0.65);
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulseDot 1.5s ease-in-out infinite;
+  }
+  @keyframes pulseDot {
+    0%,100% { opacity: 0.9; transform: scale(1); }
+    50% { opacity: 0.3; transform: scale(1.3); }
+  }
+
+  /* Depth toggle */
+  .depth-toggle {
+    margin-left: auto;
+    display: flex;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .depth-btn {
+    padding: 6px 14px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .depth-btn.active {
+    background: var(--surface2);
+    color: var(--text);
+  }
+  .depth-btn:hover:not(.active) { color: var(--text); }
+
+  /* ── MAIN LAYOUT ── */
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* ── LEFT PANEL ── */
+  .left-panel {
+    width: var(--panel-w);
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.3s ease;
+  }
+
+  .panel-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* Search / question bar */
+  .question-bar {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    cursor: text;
+    transition: border-color 0.15s;
+  }
+  .question-bar:hover { border-color: rgba(255,255,255,0.15); }
+  .question-bar .q-icon { color: var(--text-muted); font-size: 14px; }
+  .question-bar input {
+    background: none;
+    border: none;
+    outline: none;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    width: 100%;
+  }
+  .question-bar input::placeholder { color: var(--text-muted); }
+
+  /* Hotspot section */
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .hotspot-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+
+  .hotspot-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .hotspot-card:hover {
+    border-color: rgba(255,255,255,0.14);
+    background: #232840;
+  }
+  .hotspot-card.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .hotspot-rank {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 18px;
+    flex-shrink: 0;
+  }
+  .hotspot-card.active .hotspot-rank { color: var(--accent); }
+
+  .hotspot-info { flex: 1; min-width: 0; }
+  .hotspot-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hotspot-state {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .hotspot-score {
+    flex-shrink: 0;
+  }
+  .risk-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .risk-high { background: var(--red-soft); color: var(--red); }
+  .risk-med { background: var(--yellow-soft); color: var(--yellow); }
+  .risk-low { background: var(--green-soft); color: var(--green); }
+
+  /* Focus filters */
+  .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+  .chip {
+    padding: 5px 11px;
+    border-radius: 100px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .chip:hover { color: var(--text); border-color: rgba(255,255,255,0.15); }
+  .chip.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── DETAIL DRAWER (slides up from bottom of left panel) ── */
+  .detail-drawer {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.4,0,0.2,1);
+    max-height: 0;
+  }
+  .detail-drawer.open {
+    max-height: 560px;
+  }
+
+  .detail-inner {
+    padding: 20px;
+    overflow-y: auto;
+    max-height: 560px;
+  }
+
+  .detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .detail-lga {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    line-height: 1.2;
+  }
+  .detail-state-tag {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 3px;
+  }
+
+  .close-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .close-btn:hover { color: var(--text); }
+
+  /* Metric grid */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .metric-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 12px;
+  }
+  .metric-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .metric-value {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 20px;
+    line-height: 1;
+  }
+  .metric-unit {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* Percentile bars */
+  .pct-bars { margin-bottom: 16px; }
+  .pct-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .pct-label { font-size: 11px; color: var(--text-muted); width: 110px; flex-shrink: 0; }
+  .pct-track {
+    flex: 1;
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    position: relative;
+    overflow: visible;
+  }
+  .pct-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+  }
+  .pct-fill.better { background: var(--green); }
+  .pct-fill.mid { background: var(--yellow); }
+  .pct-fill.worse { background: var(--red); }
+  .pct-val { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text-muted); width: 32px; text-align: right; }
+
+  /* Action prompt */
+  .action-prompt {
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .action-prompt p {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .action-note {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.5;
+  }
+
+  /* Depth-gated sections */
+  .depth-section {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+    margin-top: 14px;
+  }
+  .depth-section.visible { display: block; }
+
+  .shap-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .shap-feature { font-size: 11px; color: var(--text-muted); width: 140px; flex-shrink: 0; }
+  .shap-track {
+    flex: 1;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .shap-fill { height: 100%; border-radius: 3px; }
+  .shap-fill.pos { background: var(--red); }
+  .shap-fill.neg { background: var(--green); }
+  .shap-val { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--text-muted); width: 40px; text-align: right; }
+
+  .dl-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s;
+    width: 100%;
+    justify-content: center;
+    margin-top: 14px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .dl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── MAP AREA ── */
+  .map-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-height: calc(100vh - var(--header-h));
+  }
+
+  .map-leaflet {
+    width: 100%;
+    height: 100%;
+    background:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px),
+      #0d1018;
+    background-size: 32px 32px;
+  }
+
+
+  /* Map overlays */
+.map-legend {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    background: rgba(15,17,23,0.96);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    min-width: 170px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+  }
+  .legend-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+  }
+  .legend-gradient {
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(to right, #22c55e, #eab308, #ef4444);
+    margin-bottom: 6px;
+  }
+  .legend-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Map tooltip */
+  .map-tooltip {
+    position: absolute;
+    background: rgba(15,17,23,0.95);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    pointer-events: none;
+    font-size: 12px;
+    display: none;
+    white-space: nowrap;
+    z-index: 10;
+  }
+  .map-tooltip.visible { display: block; }
+  .tooltip-lga { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .tooltip-row { color: var(--text-muted); font-size: 11px; }
+
+  /* Map controls */
+  .map-controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .hd-tooltip {
+    background: rgba(17, 19, 27, 0.94);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+    padding: 8px 10px;
+    color: var(--text);
+  }
+  .hd-tip-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+  .hd-tip-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .hd-tip-risk {
+    font-size: 11px;
+    color: #cbd5e1;
+  }
+
+  /* Zoom/fullscreen controls styling */
+  .leaflet-control-zoom, .leaflet-control-fullscreen {
+    box-shadow: none !important;
+    border: 1px solid var(--border) !important;
+    background: rgba(15,17,23,0.92) !important;
+    backdrop-filter: blur(8px);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .leaflet-control-zoom a, .leaflet-control-fullscreen a {
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+    background: transparent !important;
+    color: #9ca3af !important;
+    border-bottom: 1px solid var(--border) !important;
+    text-align: center;
+    font-size: 18px;
+  }
+  .leaflet-control-zoom a:last-child { border-bottom: none !important; }
+  .leaflet-control-zoom a:hover, .leaflet-control-fullscreen a:hover {
+    color: var(--text) !important;
+    border-color: rgba(255,255,255,0.18) !important;
+  }
+  .map-ctrl-btn {
+    width: 36px;
+    height: 36px;
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: #9ca3af;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .map-ctrl-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.15); }
+
+  /* Layer toggle strip */
+  .layer-strip {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    gap: 6px;
+  }
+  .layer-btn {
+    padding: 6px 12px;
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .layer-btn:hover { color: var(--text); }
+  .layer-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  /* Animated LGA polygons placeholder */
+  .lga-polygon {
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .lga-polygon:hover { opacity: 0.8; }
+
+  /* Data footnote */
+  .data-footnote {
+    position: absolute;
+    bottom: 10px;
+    left: 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── FADE IN ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .hotspot-card { animation: fadeUp 0.3s ease both; }
+  .hotspot-card:nth-child(1) { animation-delay: 0.05s; }
+  .hotspot-card:nth-child(2) { animation-delay: 0.10s; }
+  .hotspot-card:nth-child(3) { animation-delay: 0.15s; }
+  .hotspot-card:nth-child(4) { animation-delay: 0.20s; }
+  .hotspot-card:nth-child(5) { animation-delay: 0.25s; }
+
+  /* Compare strip (depth 2+) */
+  .compare-strip {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 14px 20px;
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .compare-strip.visible { display: block; }
+  .compare-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .compare-slots {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .compare-slot {
+    padding: 5px 10px;
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .compare-slot.filled {
+    border-style: solid;
+    border-color: rgba(255,255,255,0.1);
+    color: var(--text);
+  }
+  .compare-slot .remove { color: var(--text-dim); font-size: 10px; }
+  .compare-slot .remove:hover { color: var(--red); }
+  .compare-go {
+    margin-top: 8px;
+    padding: 6px 16px;
+    background: var(--accent);
+    border: none;
+    border-radius: 5px;
+    color: white;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    letter-spacing: 0.05em;
+  }
+  .compare-go:hover { opacity: 0.9; }
+  .compare-go:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Responsive note */
+  .res-note {
+    display: none;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  @media (max-width: 700px) {
+    .res-note { display: block; }
+    .left-panel { width: 100%; }
+    .map-area { display: none; }
+  }
+
+  /* Pulse for active LGA on map */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .active-lga { animation: pulse 1.5s ease-in-out 2; }
+</style>
+<!-- DATA_INJECTION -->
+</head>
+<body>
+
+<div class="app-shell">
+
+<!-- HEADER -->
+<header>
+  <div class="logo">HEALTH<span>DESERT</span> · NG</div>
+  <div class="header-divider"></div>
+
+  <!-- State selector -->
+  <div class="state-pill">
+    <span class="pill-dot"></span>
+    <span class="icon" style="font-size:11px;letter-spacing:0.05em;">STATE</span>
+    <select id="state-select" class="state-select"></select>
+  </div>
+
+  <div class="state-pill" style="gap:6px;">
+    <span class="pill-dot"></span>
+    <span class="icon" style="font-size:11px;letter-spacing:0.05em;">YEAR</span>
+    <select id="year-select" class="year-select">
+      <option value="2013">2013</option>
+      <option value="2018">2018</option>
+      <option value="Both">Both</option>
+    </select>
+  </div>
+
+  <div id="dataset-meta" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-dim);">
+    <span id="dataset-meta-text">774 LGAs | 2013</span>
+    <span id="apply-status" class="status-pill" style="margin-left:8px;"><span class="status-dot"></span>Ready</span>
+  </div>
+
+  <!-- Depth toggle -->
+  <div class="depth-toggle">
+    <button class="depth-btn active" onclick="setDepth(0,this)" data-depth="0">OVERVIEW</button>
+    <button class="depth-btn" onclick="setDepth(1,this)" data-depth="1">DETAIL</button>
+    <button class="depth-btn" onclick="setDepth(2,this)" data-depth="2">RESEARCH</button>
+  </div>
+</header>
+
+<div class="res-note">↔ Rotate device for map view</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="panel-scroll" id="panel-scroll">
+
+      <!-- Question bar -->
+      <div class="question-bar">
+        <span class="q-icon">⌕</span>
+        <input type="text" placeholder="Search LGA or ask a question…" id="search-input">
+      </div>
+
+      <!-- Focus chips -->
+      <div class="section-label">Focus</div>
+      <div class="filter-chips">
+        <div class="chip active" onclick="setFocus(this,'All risk')">All risk</div>
+        <div class="chip" onclick="setFocus(this,'Child mortality')">Child mortality</div>
+        <div class="chip" onclick="setFocus(this,'Facility access')">Facility access</div>
+        <div class="chip" onclick="setFocus(this,'Connectivity')">Connectivity</div>
+        <div class="chip" onclick="setFocus(this,'5km coverage')">5km coverage</div>
+      </div>
+
+      <!-- Hotspot list -->
+      <div class="section-label">Highest need · <span id="focus-scope">Nigeria</span></div>
+      <div class="hotspot-list" id="hotspot-list">
+        <!-- populated by JS -->
+      </div>
+
+    </div>
+
+    <!-- Detail drawer -->
+    <div class="detail-drawer" id="detail-drawer">
+      <div class="detail-inner" id="detail-inner">
+        <!-- populated by JS -->
+      </div>
+    </div>
+
+    <!-- Compare strip (depth 1+) -->
+    <div class="compare-strip" id="compare-strip">
+      <div class="compare-label">Compare LGAs</div>
+      <div class="compare-slots" id="compare-slots">
+        <div class="compare-slot" onclick="addCompareSlot()">+ Add LGA</div>
+      </div>
+      <button class="compare-go" id="compare-go-btn" disabled onclick="runCompare()">RUN COMPARISON →</button>
+    </div>
+
+  </div>
+
+  <!-- MAP AREA -->
+  <div class="map-area" id="map-area">
+
+    <div id="map-leaflet" class="map-leaflet"></div>
+
+    <!-- Layer toggles -->
+    <div class="layer-strip">
+      <div class="layer-btn active" onclick="toggleLayer(this)">Risk score</div>
+      <div class="layer-btn" onclick="toggleLayer(this)">Facilities</div>
+      <div class="layer-btn" onclick="toggleLayer(this)">Population</div>
+      <div class="layer-btn depth-gate depth-1" style="display:none" onclick="toggleLayer(this)">Towers</div>
+      <div class="layer-btn depth-gate depth-2" style="display:none" onclick="toggleLayer(this)">SHAP</div>
+    </div>
+
+    <!-- Legend -->
+    <div class="map-legend">
+      <div class="legend-title">Risk score</div>
+      <div class="legend-gradient"></div>
+      <div class="legend-labels"><span>Lower</span><span>Higher</span></div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--green)"></div><span>Better / lower risk</span></div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--yellow)"></div><span>Medium</span></div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--red)"></div><span>Worse / higher risk</span></div>
+    </div>
+
+    <!-- Footnote -->
+    <div class="data-footnote">DHS 2013 ? NHFR ? OpenCellID ? Model v2b6bc3e</div>
+
+  </div>
+</div>
+<script>
+// Data injected from Streamlit
+const injected = window.__INITIAL_DATA__ || {};
+const meta = injected.meta || {};
+const lgas = injected.lgas || [];
+const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [];
+const stateOptions = ['All Nigeria', ...(injected.states || [])];
+let currentState = meta.state_filter || 'All Nigeria';
+let currentDepth = Number(meta.depth || 0);
+let currentFocus = meta.focus || 'All risk';
+let currentYear = meta.year != null ? String(meta.year) : '2018';
+let currentLayer = 'Risk score';
+
+const selectedId = meta.selected_lga || (injected.selected && injected.selected.id);
+let selectedLGA = null;
+if (selectedId) {
+  const base = lgas.find(l => String(l.id) === String(selectedId)) || {};
+  selectedLGA = { ...base, ...(injected.selected || {}) };
+} else if (injected.selected) {
+  selectedLGA = injected.selected;
+}
+
+let compareLGAs = (meta.compare_lgas || [])
+  .map(id => lgas.find(l => String(l.id) === String(id)))
+  .filter(Boolean);
+
+const riskLookup = {};
+(injected.map?.choropleth || []).forEach(item => {
+  const val = item.risk_norm ?? item.risk;
+  riskLookup[String(item.id)] = val != null ? Number(val) : null;
+});
+
+let mapInstance = null;
+let geoLayer = null;
+
+function riskLabel(r) {
+  return r == null || isNaN(r) ? 'NA' : (Number(r) * 100).toFixed(0);
+}
+function fmtMetric(v) {
+  if (v == null || isNaN(v)) return '?';
+  const num = Number(v);
+  if (Math.abs(num) >= 10) return num.toFixed(0);
+  return num.toFixed(1);
+}
+function riskColorHex(r) {
+  if (r == null || isNaN(r)) return 'rgba(52, 211, 153, 0.6)';
+  const v = Math.max(0, Math.min(1, r));
+  if (v > 0.66) {
+    const t = (v - 0.66) / 0.34;
+    return `rgba(239, ${Math.round(68 - 68*t)}, ${Math.round(68 - 68*t)}, ${0.7 + t*0.2})`;
+  } else if (v > 0.33) {
+    const t = (v - 0.33) / 0.33;
+    return `rgba(${Math.round(234 * t + 34*(1-t))}, ${Math.round(179*t + 197*(1-t))}, ${Math.round(8*t + 94*(1-t))}, 0.75)`;
+  }
+  return `rgba(34, 197, 94, ${0.4 + v * 0.8})`;
+}
+
+function syncHeader() {
+  const metaEl = document.getElementById('dataset-meta-text');
+  if (metaEl) {
+    const count = meta.lga_count || lgas.length || '?';
+    const yearText = currentYear || '?';
+    metaEl.textContent = `${count} LGAs | ${yearText}`;
+  }
+  const focusScope = document.getElementById('focus-scope');
+  if (focusScope) focusScope.textContent = currentState;
+  document.querySelectorAll('.depth-btn').forEach(btn => {
+    const depthVal = Number(btn.dataset.depth || 0);
+    btn.classList.toggle('active', depthVal === currentDepth);
+  });
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.classList.toggle('active', chip.textContent.trim() === currentFocus);
+  });
+  const status = document.getElementById('apply-status');
+  if (status) { status.innerHTML = '<span class="status-dot" style="animation:none;opacity:0.9;"></span>Applied'; }
+}
+
+function applyDepthVisibility() {
+  document.querySelectorAll('.depth-gate').forEach(el => {
+    const elDepth = parseInt([...el.classList].find(c => c.startsWith('depth-'))?.replace('depth-','') || '99');
+    el.style.display = currentDepth >= elDepth ? '' : 'none';
+  });
+  const strip = document.getElementById('compare-strip');
+  if (strip) strip.classList.toggle('visible', currentDepth >= 1);
+}
+
+function pushStateToPython() {
+  const params = new URLSearchParams(window.parent.location.search);
+  params.set('state', currentState);
+  params.set('focus', currentFocus);
+  params.set('depth', currentDepth);
+  params.set('year', currentYear);
+  if (selectedLGA?.id) params.set('lga', selectedLGA.id); else params.delete('lga');
+  if (compareLGAs.length) params.set('compare', compareLGAs.map(l => l.id).join(',')); else params.delete('compare');
+  const status = document.getElementById('apply-status');
+  if (status) { status.innerHTML = '<span class="status-dot"></span>Updating?'; }
+  const newUrl = `${window.parent.location.pathname}?${params.toString()}`;
+  window.parent.location.replace(newUrl);
+}
+
+function renderHotspots() {
+  const list = document.getElementById('hotspot-list');
+  const query = (document.getElementById('search-input')?.value || '').toLowerCase();
+  const base = hotspotsPayload.length
+    ? hotspotsPayload
+    : [...lgas].sort((a,b) => (b.risk ?? 0) - (a.risk ?? 0)).map((l, i) => ({ ...l, rank: i + 1 }));
+  const filtered = query
+    ? base.filter(l => `${l.name} ${l.state}`.toLowerCase().includes(query))
+    : base;
+  list.innerHTML = filtered.slice(0, 12).map((lga, i) => `
+    <div class="hotspot-card ${selectedLGA?.id == lga.id ? 'active' : ''}"
+         onclick="selectLGA('${lga.id}')"
+         style="animation-delay:${(i) * 0.04}s">
+      <div class="hotspot-rank">${String(lga.rank ?? i + 1).padStart(2,'0')}</div>
+      <div class="hotspot-info">
+        <div class="hotspot-name">${lga.name}</div>
+        <div class="hotspot-state">${lga.state}</div>
+      </div>
+      <div class="hotspot-score">
+        <div class="risk-badge ${lga.risk != null && lga.risk > 0.66 ? 'risk-high' : lga.risk > 0.33 ? 'risk-med' : 'risk-low'}">${riskLabel(lga.risk)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectLGA(id) {
+  const base = lgas.find(l => String(l.id) === String(id));
+  if (!base) return;
+  selectedLGA = { ...base };
+  if (injected.selected && String(injected.selected.id) === String(id)) {
+    selectedLGA = { ...selectedLGA, ...injected.selected };
+  }
+  renderHotspots();
+  renderDetail();
+  openDrawer();
+  renderMap();
+  pushStateToPython();
+}
+
+function openDrawer() {
+  document.getElementById('detail-drawer').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('detail-drawer').classList.remove('open');
+  selectedLGA = null;
+  renderHotspots();
+  renderMap();
+  pushStateToPython();
+}
+
+function percentileRank(field, value) {
+  const vals = lgas.map(l => l[field]).filter(v => v != null).sort((a,b) => a-b);
+  if (!vals.length || value == null) return null;
+  const idx = vals.findIndex(v => v >= value);
+  return Math.round((idx / Math.max(vals.length - 1, 1)) * 100);
+}
+
+function renderDetail() {
+  if (!selectedLGA) return;
+  const lga = selectedLGA;
+  const distPct = 100 - (percentileRank('dist', lga.dist) ?? 50);
+  const facPct  = percentileRank('fac', lga.fac) ?? 50;
+  const u5Pct   = 100 - (percentileRank('u5mr', lga.u5mr) ?? 50);
+  const covPct  = percentileRank('cov', lga.cov) ?? 50;
+  let action = 'Review the metrics below alongside local knowledge before making a staffing decision.';
+  if (lga.fac != null && lga.dist != null && lga.fac < 0.5 && lga.dist > 5) {
+    action = 'Very few facilities and long travel times. Consider mobile clinic deployment.';
+  } else if (lga.u5mr != null && lga.u5mr > 150) {
+    action = 'Under-5 mortality is among the highest in the dataset. Cross-check with immunisation coverage.';
+  } else if (lga.cov != null && lga.cov < 20) {
+    action = 'Less than 20% of this LGA is within 5km of a facility. A new fixed post would significantly improve access.';
+  }
+  const shapRows = lga.shap
+    ? Object.entries(lga.shap).sort((a,b) => Math.abs(b[1]) - Math.abs(a[1]))
+    : [];
+  const inner = document.getElementById('detail-inner');
+  inner.innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-lga">${lga.name}</div>
+        <div class="detail-state-tag">${lga.state} ? Risk score: <span style="color:var(--${lga.risk>0.66?'red':lga.risk>0.33?'yellow':'green'})">${riskLabel(lga.risk)}</span></div>
+      </div>
+      <button class="close-btn" onclick="closeDrawer()">?</button>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric-cell">
+        <div class="metric-label">Facilities / 10k</div>
+        <div class="metric-value" style="color:${lga.fac<0.5?'var(--red)':lga.fac<1.5?'var(--yellow)':'var(--green)'}">${fmtMetric(lga.fac)}</div>
+        <div class="metric-unit">per 10,000 pop</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Avg distance</div>
+        <div class="metric-value" style="color:${lga.dist>8?'var(--red)':lga.dist>4?'var(--yellow)':'var(--green)'}">${fmtMetric(lga.dist)}</div>
+        <div class="metric-unit">km to nearest</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Under-5 mortality</div>
+        <div class="metric-value" style="color:${lga.u5mr>150?'var(--red)':lga.u5mr>80?'var(--yellow)':'var(--green)'}">${fmtMetric(lga.u5mr)}</div>
+        <div class="metric-unit">per 1,000 births</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">5km coverage</div>
+        <div class="metric-value" style="color:${lga.cov<20?'var(--red)':lga.cov<50?'var(--yellow)':'var(--green)'}">${fmtMetric(lga.cov)}</div>
+        <div class="metric-unit">area within 5km</div>
+      </div>
+    </div>
+
+    <div class="section-label" style="margin-bottom:8px;">vs Nigeria</div>
+    <div class="pct-bars">
+      ${[
+        { label:'Facility access', pct: facPct },
+        { label:'Travel distance', pct: distPct },
+        { label:'Child survival',  pct: u5Pct  },
+        { label:'5km coverage',   pct: covPct  },
+      ].map(r => `
+        <div class="pct-row">
+          <div class="pct-label">${r.label}</div>
+          <div class="pct-track">
+            <div class="pct-fill ${r.pct>=66?'better':r.pct>=33?'mid':'worse'}" style="width:${r.pct}%"></div>
+          </div>
+          <div class="pct-val">${r.pct}%</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="action-prompt">
+      <p>${action}</p>
+    </div>
+    <p class="action-note">Decision-support only. Always combine with local knowledge and community input.</p>
+
+    <div class="depth-section ${currentDepth >= 2 && shapRows.length ? 'visible' : ''}" id="shap-section">
+      <div class="section-label" style="margin-bottom:10px;">Feature contribution (SHAP)</div>
+      ${shapRows.length ? shapRows.map(([k, v]) => `
+        <div class="shap-row">
+          <div class="shap-feature">${k}</div>
+          <div class="shap-track">
+            <div class="shap-fill ${v >= 0 ? 'pos' : 'neg'}" style="width:${Math.min(Math.abs(v) * 200, 100)}%"></div>
+          </div>
+          <div class="shap-val">${v >= 0 ? '+' : ''}${Number(v).toFixed(2)}</div>
+        </div>
+      `).join('') : '<div class="shap-row"><div class="shap-feature">No SHAP data</div></div>'}
+      <button class="dl-btn" onclick="downloadLGA()">? Download LGA data (CSV)</button>
+    </div>
+  `;
+}
+function setDepth(d, btn) {
+  currentDepth = d;
+  if (btn) {
+    document.querySelectorAll('.depth-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  applyDepthVisibility();
+  if (selectedLGA) renderDetail();
+  renderMap();
+  pushStateToPython();
+}
+
+function setFocus(chip, focus) {
+  currentFocus = focus;
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  pushStateToPython();
+}
+
+function addCompareSlot() {
+  if (!selectedLGA) return;
+  if (compareLGAs.find(l => l.id === selectedLGA.id)) return;
+  if (compareLGAs.length >= 4) return;
+  compareLGAs.push(selectedLGA);
+  renderCompareSlots();
+  pushStateToPython();
+}
+
+function removeCompare(id) {
+  compareLGAs = compareLGAs.filter(l => l.id !== id);
+  renderCompareSlots();
+  pushStateToPython();
+}
+
+function renderCompareSlots() {
+  const slots = document.getElementById('compare-slots');
+  const btn = document.getElementById('compare-go-btn');
+  slots.innerHTML = compareLGAs.map(l => `
+    <div class="compare-slot filled">
+      <span>${l.name}</span>
+      <span class="remove" onclick="removeCompare('${l.id}')">?</span>
+    </div>
+  `).join('') + (compareLGAs.length < 4 ? `<div class="compare-slot" onclick="addCompareSlot()">+ Add LGA</div>` : '');
+  btn.disabled = compareLGAs.length < 2;
+}
+
+function runCompare() {
+  alert(`Compare view: ${compareLGAs.map(l=>l.name).join(' vs ')}`);
+}
+
+function initMap() {
+  if (mapInstance) return;
+  mapInstance = L.map("map-leaflet", { zoomControl: true, attributionControl: false, minZoom: 5, maxZoom: 12 }).setView([9.1, 8.7], 6);
+  if (mapInstance.fullscreenControl == null && L.Control.Fullscreen) {
+    mapInstance.addControl(new L.Control.Fullscreen({ position: "topleft" }));
+  }
+}
+
+function valueForLayer(lga, layer) {
+  if (!lga) return null;
+  switch(layer) {
+    case 'Facilities': return lga.fac;
+    case 'Population': return lga.density ?? lga.pop;
+    case 'Towers': return lga.towers;
+    case 'SHAP': return lga.shap ? Object.values(lga.shap)[0] : null;
+    default: return lga.risk;
+  }
+}
+
+function renderMap() {
+  initMap();
+  if (!mapInstance) return;
+  if (geoLayer) { geoLayer.remove(); }
+  let gj = injected.map?.geojson ? JSON.parse(injected.map.geojson) : null;
+  if (gj && Array.isArray(gj.features) && typeof turf !== 'undefined') {
+    try {
+      gj = {
+        ...gj,
+        features: gj.features.map(f => turf.transformScale(f, 0.80, {origin: 'centroid'})),
+      };
+    } catch (e) {
+      // fall back to original geometry if scaling fails
+    }
+  }
+  if (!gj) return;
+
+  const fieldValues = lgas.map(l => valueForLayer(l, currentLayer)).filter(v => v != null && !isNaN(v));
+  const minVal = fieldValues.length ? Math.min(...fieldValues) : 0;
+  const maxVal = fieldValues.length ? Math.max(...fieldValues) : 1;
+  const scaleVal = (id) => {
+    const lga = lgas.find(l => String(l.id) === String(id));
+    const val = valueForLayer(lga, currentLayer);
+    if (val == null || isNaN(val)) return null;
+    if (maxVal === minVal) return 0.5;
+    return (val - minVal) / (maxVal - minVal);
+  };
+  const displayVal = (id) => {
+    const lga = lgas.find(l => String(l.id) === String(id));
+    const val = valueForLayer(lga, currentLayer);
+    return currentLayer === 'Risk score' ? riskLabel(val) : fmtMetric(val);
+  };
+
+  geoLayer = L.geoJSON(gj, {
+    style: feature => {
+      const id = String(feature.properties?.lga_uid ?? feature.properties?.lga_name);
+      const norm = currentLayer === 'Risk score' ? riskLookup[id] : scaleVal(id);
+      const fill = riskColorHex(norm);
+      const selected = selectedLGA && String(selectedLGA.id) === id;
+      return { color: selected ? '#ffffff' : '#0f172a', weight: selected ? 2.5 : 0.25, fillColor: fill, fillOpacity: 0.45 };
+    },
+    onEachFeature: (feature, layer) => {
+      const id = String(feature.properties?.lga_uid ?? feature.properties?.lga_name);
+      const name = feature.properties?.lga_name || id;
+      const state = feature.properties?.state_name || '';
+      const showVal = displayVal(id);
+      layer.bindTooltip(
+        `<div class="hd-tip"><div class="hd-tip-title">${name}</div><div class="hd-tip-sub">${state}</div><div class="hd-tip-risk">Risk: ${showVal}</div></div>`,
+        {sticky:true, direction:'top', className:'hd-tooltip'}
+      );
+      layer.on('click', () => selectLGA(id));
+    }
+  }).addTo(mapInstance);
+
+  try {
+    mapInstance.fitBounds(geoLayer.getBounds(), { padding: [10,10] });
+  } catch(e) {}
+}
+
+function downloadLGA() {
+  if (!selectedLGA) return;
+  const l = selectedLGA;
+  const csv = `lga_name,state,risk_score,facilities_per_10k,avg_distance_km,u5mr,population,coverage_5km_pct
+${l.name},${l.state},${l.risk ?? ''},${l.fac ?? ''},${l.dist ?? ''},${l.u5mr ?? ''},${l.pop ?? ''},${l.cov ?? ''}`;
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `${(l.name || 'lga').replace(/\s+/g,'_')}_health_data.csv`; a.click();
+}
+
+function toggleLayer(btn) {
+  document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentLayer = btn.textContent.trim();
+  const legendTitle = document.querySelector('.legend-title');
+  if (legendTitle) legendTitle.textContent = currentLayer;
+  renderMap();
+}
+
+// Populate selects and wire events
+const stateSelect = document.getElementById('state-select');
+stateOptions.forEach(st => {
+  const opt = document.createElement('option');
+  opt.value = st; opt.textContent = st; stateSelect.appendChild(opt);
+});
+stateSelect.value = currentState;
+stateSelect.addEventListener('change', (e) => {
+  currentState = e.target.value;
+  syncHeader();
+  pushStateToPython();
+});
+
+const yearSelect = document.getElementById('year-select');
+yearSelect.value = currentYear;
+yearSelect.addEventListener('change', (e) => {
+  currentYear = e.target.value;
+  pushStateToPython();
+});
+
+const searchInput = document.getElementById('search-input');
+if (searchInput) searchInput.addEventListener('input', renderHotspots);
+
+syncHeader();
+applyDepthVisibility();
+renderHotspots();
+renderCompareSlots();
+renderMap();
+if (selectedLGA) {
+  openDrawer();
+  renderDetail();
+}
+</script>
+</body>
+</html>

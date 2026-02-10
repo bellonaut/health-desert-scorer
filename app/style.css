@@ -1,0 +1,6 @@
+/* Tighten metric font */
+[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
+/* Remove st.radio visual label gap */
+.stRadio > label { display: none; }
+/* Rank numbers in hotspot list */
+.hotspot-rank { font-family: monospace; color: #6b7280; }
