@@ -115,6 +115,7 @@ def main() -> None:
 """,
         unsafe_allow_html=True,
     )
+    st.markdown("<style>html, body {overflow:hidden !important;}</style>", unsafe_allow_html=True)
 
     render_embedded_app(geo_df, shap_df, st.session_state)
 

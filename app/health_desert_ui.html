@@ -614,6 +614,31 @@
     font-size: 11px;
     color: #cbd5e1;
   }
+
+  /* Zoom/fullscreen controls styling */
+  .leaflet-control-zoom, .leaflet-control-fullscreen {
+    box-shadow: none !important;
+    border: 1px solid var(--border) !important;
+    background: rgba(15,17,23,0.92) !important;
+    backdrop-filter: blur(8px);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .leaflet-control-zoom a, .leaflet-control-fullscreen a {
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+    background: transparent !important;
+    color: #9ca3af !important;
+    border-bottom: 1px solid var(--border) !important;
+    text-align: center;
+    font-size: 18px;
+  }
+  .leaflet-control-zoom a:last-child { border-bottom: none !important; }
+  .leaflet-control-zoom a:hover, .leaflet-control-fullscreen a:hover {
+    color: var(--text) !important;
+    border-color: rgba(255,255,255,0.18) !important;
+  }
   .map-ctrl-btn {
     width: 36px;
     height: 36px;
@@ -1215,7 +1240,7 @@ function renderMap() {
     try {
       gj = {
         ...gj,
-        features: gj.features.map(f => turf.transformScale(f, 0.90, {origin: 'centroid'})),
+        features: gj.features.map(f => turf.transformScale(f, 0.80, {origin: 'centroid'})),
       };
     } catch (e) {
       // fall back to original geometry if scaling fails
@@ -1245,7 +1270,7 @@ function renderMap() {
       const norm = currentLayer === 'Risk score' ? riskLookup[id] : scaleVal(id);
       const fill = riskColorHex(norm);
       const selected = selectedLGA && String(selectedLGA.id) === id;
-      return { color: selected ? '#ffffff' : '#0f172a', weight: selected ? 2.5 : 0.3, fillColor: fill, fillOpacity: 0.5 };
+      return { color: selected ? '#ffffff' : '#0f172a', weight: selected ? 2.5 : 0.25, fillColor: fill, fillOpacity: 0.45 };
     },
     onEachFeature: (feature, layer) => {
       const id = String(feature.properties?.lga_uid ?? feature.properties?.lga_name);
