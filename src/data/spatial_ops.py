@@ -10,6 +10,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from shapely.geometry import Point
+from shapely.ops import unary_union
 
 from src.config import (
     MIN_SPATIAL_JOIN_SUCCESS_RATE,
@@ -590,12 +591,24 @@ def coverage_within_km(
 ) -> pd.DataFrame:
     """Estimate coverage within km. Uses area coverage if population raster is missing."""
 
+    # Metric operations use Web Mercator (EPSG:3857); suitable for app metrics but not analysis-grade precision.
     lgas = _ensure_crs(lga_gdf, CRS.wgs84).to_crs(CRS.metric)
     if "lga_id" not in lgas.columns:
         lgas["lga_id"] = np.arange(len(lgas))
-    facilities = _ensure_crs(facilities_gdf, CRS.wgs84).to_crs(CRS.metric)
+
+    # Heal invalid LGA geometries to avoid self-intersection artifacts.
+    invalid_mask = ~lgas.geometry.is_valid
+    if invalid_mask.any():
+        lgas = lgas.copy()
+        lgas.loc[invalid_mask, "geometry"] = lgas.loc[invalid_mask, "geometry"].buffer(0)
+
+    facilities = _ensure_crs(facilities_gdf, CRS.wgs84)
+    facilities = facilities[
+        facilities.geometry.notna() & ~facilities.geometry.is_empty
+    ].copy()
+    facilities = facilities.to_crs(CRS.metric)
     buffer_geom = facilities.buffer(km * 1000.0)
-    buffer_union = buffer_geom.union_all()
+    buffer_union = unary_union(buffer_geom.values)
     coverage = []
 
     if population_raster:
@@ -621,7 +634,16 @@ def coverage_within_km(
 
     lga_area = lgas.geometry.area
     covered_area = lgas.geometry.intersection(buffer_union).area
-    pct = np.where(lga_area > 0, (covered_area / lga_area) * 100, np.nan)
+    raw_pct = np.where(lga_area > 0, (covered_area / lga_area) * 100, np.nan)
+    over_100 = int(np.sum(np.nan_to_num(raw_pct) > 100.0))
+    if over_100 > 0:
+        LOGGER.warning(
+            "coverage_within_km: %d LGAs had raw coverage > 100%% before clamping (max=%.1f). "
+            "Check facility geometry validity and LGA boundary overlaps.",
+            over_100,
+            float(np.nanmax(raw_pct)),
+        )
+    pct = np.clip(raw_pct, 0.0, 100.0)
     return pd.DataFrame(
         {
             "lga_id": lgas["lga_id"].values,
