@@ -168,6 +168,7 @@
     display: flex;
     overflow: hidden;
     position: relative;
+    height: calc(100vh - var(--header-h));
   }
 
   /* ── LEFT PANEL ── */
@@ -501,7 +502,7 @@
     flex: 1;
     position: relative;
     overflow: hidden;
-    min-height: calc(100vh - var(--header-h));
+    height: 100%;
   }
 
   .map-leaflet {
@@ -660,9 +661,10 @@
   .layer-strip {
     position: absolute;
     top: 20px;
-    left: 20px;
+    left: 78px; /* offset to avoid overlapping Leaflet zoom/fullscreen controls */
     display: flex;
     gap: 6px;
+    z-index: 410;
   }
   .layer-btn {
     padding: 6px 12px;
@@ -679,6 +681,14 @@
   }
   .layer-btn:hover { color: var(--text); }
   .layer-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .layer-strip {
+      left: 64px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
 
   /* Animated LGA polygons placeholder */
   .lga-polygon {
@@ -1231,6 +1241,16 @@ function valueForLayer(lga, layer) {
   }
 }
 
+function layerLabel(layer) {
+  switch(layer) {
+    case 'Facilities': return 'Facilities / 10k';
+    case 'Population': return 'Population';
+    case 'Towers': return 'Towers / 10k';
+    case 'SHAP': return 'SHAP';
+    default: return 'Risk score';
+  }
+}
+
 function renderMap() {
   initMap();
   if (!mapInstance) return;
@@ -1277,8 +1297,9 @@ function renderMap() {
       const name = feature.properties?.lga_name || id;
       const state = feature.properties?.state_name || '';
       const showVal = displayVal(id);
+      const label = layerLabel(currentLayer);
       layer.bindTooltip(
-        `<div class="hd-tip"><div class="hd-tip-title">${name}</div><div class="hd-tip-sub">${state}</div><div class="hd-tip-risk">Risk: ${showVal}</div></div>`,
+        `<div class="hd-tip"><div class="hd-tip-title">${name}</div><div class="hd-tip-sub">${state}</div><div class="hd-tip-risk">${label}: ${showVal}</div></div>`,
         {sticky:true, direction:'top', className:'hd-tooltip'}
       );
       layer.on('click', () => selectLGA(id));
