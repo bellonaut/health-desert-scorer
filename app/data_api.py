@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
@@ -25,6 +26,9 @@ FOCUS_COLUMN = {
 }
 
 ASCENDING_FOCUS = {"facilities_per_10k", "towers_per_10k", "coverage_5km"}
+
+# Optional softening for over-confident probabilities; env var lets us tune without code changes
+RISK_TEMPERATURE = float(os.getenv("RISK_TEMPERATURE", "2.0"))
 
 # Columns we expect to exist to avoid KeyErrors downstream
 EXPECTED_COLUMNS = [
@@ -77,6 +81,21 @@ def _load_predictions() -> pd.DataFrame:
     return pd.read_csv(preds_path)
 
 
+def _temperature_scale(probs: pd.Series, temperature: float = 1.0) -> pd.Series:
+    """Soften extreme probabilities by dividing logits by a temperature > 1.
+
+    Keeps values in (0,1) and leaves NaNs untouched.
+    """
+    if temperature <= 0:
+        return probs
+    eps = 1e-6
+    clipped = pd.to_numeric(probs, errors="coerce").clip(eps, 1 - eps)
+    logits = np.log(clipped / (1 - clipped))
+    scaled = logits / temperature
+    softened = 1 / (1 + np.exp(-scaled))
+    return softened
+
+
 def _load_shap() -> pd.DataFrame | None:
     shap_path = PROCESSED_DIR / "shap_values.csv"
     if not shap_path.exists():
@@ -96,6 +115,8 @@ def load_backend_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame | None]:
     if "risk_score" not in merged_features.columns:
         merged_features["risk_score"] = pd.to_numeric(merged_features.get("risk_prob"), errors="coerce")
     merged_features["risk_score"] = pd.to_numeric(merged_features["risk_score"], errors="coerce").clip(0, 1)
+    if RISK_TEMPERATURE and RISK_TEMPERATURE != 1.0:
+        merged_features["risk_score"] = _temperature_scale(merged_features["risk_score"], RISK_TEMPERATURE)
 
     merged = boundaries.merge(merged_features, on="lga_name", how="left")
     if "lga_uid_x" in merged.columns or "lga_uid_y" in merged.columns:
