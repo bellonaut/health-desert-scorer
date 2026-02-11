@@ -77,6 +77,13 @@ def main() -> None:
     st.markdown(
         """
 <style>
+    html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        overflow: hidden !important;
+    }
     .block-container, .main .block-container {
         padding: 0 !important;
         margin: 0 !important;
@@ -94,6 +101,14 @@ def main() -> None:
     [data-testid="stAppViewContainer"] {
         padding: 0 !important;
         margin: 0 !important;
+        overflow: hidden !important;
+    }
+    .main, [data-testid="stMain"], [data-testid="stMainBlockContainer"],
+    [data-testid="stVerticalBlock"], .element-container {
+        margin: 0 !important;
+        padding: 0 !important;
+        gap: 0 !important;
+        overflow: hidden !important;
     }
     [data-testid="stHeader"] { display: none !important; height: 0 !important; }
     [data-testid="stToolbar"] { display: none !important; }

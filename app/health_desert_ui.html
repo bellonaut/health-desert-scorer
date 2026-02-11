@@ -187,7 +187,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 20px;
+    padding: 24px;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
@@ -197,11 +197,11 @@
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 10px 14px;
+    padding: 12px 16px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 20px;
+    gap: 12px;
+    margin-bottom: 28px;
     cursor: text;
     transition: border-color 0.15s;
   }
@@ -297,8 +297,8 @@
   .filter-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 24px;
+    gap: 10px;
+    margin-bottom: 28px;
   }
   .chip {
     padding: 5px 11px;
@@ -763,7 +763,7 @@
     border-color: rgba(255,255,255,0.1);
     color: var(--text);
   }
-  .compare-slot .remove { color: var(--text-dim); font-size: 10px; }
+  .compare-slot .remove { color: var(--text-dim); font-size: 12px; line-height: 1; }
   .compare-slot .remove:hover { color: var(--red); }
   .compare-go {
     margin-top: 8px;
@@ -1108,7 +1108,7 @@ function renderDetail() {
         <div class="detail-lga">${lga.name}</div>
         <div class="detail-state-tag">${lga.state} ? Risk score: <span style="color:var(--${lga.risk>0.66?'red':lga.risk>0.33?'yellow':'green'})">${riskLabel(lga.risk)}</span></div>
       </div>
-      <button class="close-btn" onclick="closeDrawer()">?</button>
+      <button class="close-btn" onclick="closeDrawer()">×</button>
     </div>
 
     <div class="metric-grid">
@@ -1209,10 +1209,10 @@ function removeCompare(id) {
 function renderCompareSlots() {
   const slots = document.getElementById('compare-slots');
   const btn = document.getElementById('compare-go-btn');
-  slots.innerHTML = compareLGAs.map(l => `
+slots.innerHTML = compareLGAs.map(l => `
     <div class="compare-slot filled">
       <span>${l.name}</span>
-      <span class="remove" onclick="removeCompare('${l.id}')">?</span>
+      <span class="remove" onclick="removeCompare('${l.id}')">×</span>
     </div>
   `).join('') + (compareLGAs.length < 4 ? `<div class="compare-slot" onclick="addCompareSlot()">+ Add LGA</div>` : '');
   btn.disabled = compareLGAs.length < 2;
@@ -1330,6 +1330,15 @@ function toggleLayer(btn) {
   renderMap();
 }
 
+// Resize Streamlit iframe to match content height
+function resizeFrame() {
+  const h = document.documentElement.scrollHeight;
+  const target = Math.max(h + 16, window.parent?.innerHeight || h);
+  window.parent.postMessage({ type: 'streamlit:resize', height: target }, '*');
+}
+window.addEventListener('load', resizeFrame);
+new ResizeObserver(resizeFrame).observe(document.body);
+
 // Populate selects and wire events
 const stateSelect = document.getElementById('state-select');
 stateOptions.forEach(st => {
@@ -1362,6 +1371,7 @@ if (selectedLGA) {
   openDrawer();
   renderDetail();
 }
+resizeFrame();
 </script>
 </body>
 </html>

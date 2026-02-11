@@ -122,7 +122,7 @@ def render_embedded_app(
     shap_df,
     session_state: Mapping[str, Any],
     html_path: Path = HTML_PATH,
-    height: int = 1200,
+    height: int = 1100,
 ) -> None:
     payload = build_payload(geo_df, shap_df, session_state)
     injected = inject_data_to_html(html_path, payload)
