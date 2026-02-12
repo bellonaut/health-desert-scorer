@@ -66,6 +66,14 @@ function riskLabel(r) {
   return r == null || Number.isNaN(Number(r)) ? 'NA' : (Number(r) * 100).toFixed(0);
 }
 
+function confidenceBadge(conf) {
+  const n = safeNum(conf);
+  if (n == null) return { emoji: '🟡', label: 'Unknown' };
+  if (n >= 80) return { emoji: '🟢', label: `${n.toFixed(0)}%` };
+  if (n >= 60) return { emoji: '🟡', label: `${n.toFixed(0)}%` };
+  return { emoji: '🔴', label: `${n.toFixed(0)}%` };
+}
+
 function fmtMetric(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
   const num = Number(v);
@@ -248,13 +256,18 @@ function renderHotspots() {
     const scoreWrap = document.createElement('div');
     scoreWrap.className = 'hotspot-score';
 
+    const conf = confidenceBadge(lga.confidence_pct);
+    const confEl = document.createElement('div');
+    confEl.className = 'hotspot-state';
+    confEl.textContent = `${conf.emoji} ${conf.label}`;
+
     const badge = document.createElement('div');
     const risk = safeNum(lga.risk);
     const bucket = risk != null && risk > 0.66 ? 'risk-high' : risk != null && risk > 0.33 ? 'risk-med' : 'risk-low';
     badge.className = `risk-badge ${bucket}`;
     badge.textContent = riskLabel(risk);
 
-    scoreWrap.appendChild(badge);
+    scoreWrap.append(confEl, badge);
     card.append(rank, info, scoreWrap);
     card.addEventListener('click', () => selectLGA(lga.id));
     list.appendChild(card);
@@ -319,7 +332,7 @@ function renderDetail() {
   const u5Pct = 100 - (percentileRank('u5mr', safeNum(lga.u5mr)) ?? 50);
   const covPct = percentileRank('cov', safeNum(lga.cov)) ?? 50;
 
-  let action = 'Review the metrics below alongside local knowledge before making a staffing decision.';
+  let action = 'Review these access barriers alongside local knowledge before making planning decisions.';
   if (safeNum(lga.fac) != null && safeNum(lga.dist) != null && Number(lga.fac) < 0.5 && Number(lga.dist) > 5) {
     action = 'Very few facilities and long travel times. Consider mobile clinic deployment.';
   } else if (safeNum(lga.u5mr) != null && Number(lga.u5mr) > 150) {
@@ -333,6 +346,7 @@ function renderDetail() {
     : [];
 
   const riskNum = safeNum(lga.risk);
+  const conf = confidenceBadge(lga.confidence_pct);
   const riskClass = riskNum != null && riskNum > 0.66
     ? 'metric-risk-red'
     : riskNum != null && riskNum > 0.33
@@ -354,6 +368,7 @@ function renderDetail() {
           ${escapeHtml(sanitizeText(lga.state, 'Unknown state'))} · Risk score:
           <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum))}</span>
         </div>
+        <div class="detail-state-tag">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)}</div>
       </div>
       <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close details">×</button>
     </div>

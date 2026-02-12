@@ -58,6 +58,8 @@ def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str,
             "towers": _safe_float(getattr(row, "towers_per_10k", None)),
             "density": _safe_float(getattr(row, "population_density", None)),
             "year": getattr(row, "year", None),
+            "confidence_pct": _safe_float(getattr(row, "confidence_pct", None)),
+            "confidence_reason_codes": getattr(row, "confidence_reason_codes", None),
         }
         if include_shap:
             rec["shap"] = None  # populated per-selection to keep payload light

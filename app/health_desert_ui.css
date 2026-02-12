@@ -817,3 +817,7 @@ header {
   .left-panel { width: 100%; }
   .map-area { display: none; }
 }
+
+.meta-link { color: #e2e8f0; text-decoration: none; font-size: 12px; }
+.meta-link:hover { text-decoration: underline; }
+

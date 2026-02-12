@@ -15,6 +15,7 @@ import pandas as pd
 ROOT_DIR = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT_DIR / "data" / "raw"
 PROCESSED_DIR = ROOT_DIR / "data" / "processed"
+GOLD_DIR = ROOT_DIR / "data" / "gold"
 
 # Frontend focus labels -> dataframe columns
 FOCUS_COLUMN = {
@@ -42,7 +43,20 @@ EXPECTED_COLUMNS = [
     "coverage_5km",
     "shap_importance",
     "year",
+    "confidence_pct",
+    "confidence_reason_codes",
+    "risk_score_total",
 ]
+
+
+def _load_gold_predictions() -> pd.DataFrame:
+    gold_path = GOLD_DIR / "gold_lga_risk.csv"
+    if not gold_path.exists():
+        return pd.DataFrame()
+    gold = pd.read_csv(gold_path)
+    if "risk_score_total" in gold.columns:
+        gold["risk_score"] = pd.to_numeric(gold["risk_score_total"], errors="coerce") / 10.0
+    return gold
 
 
 def _load_boundaries() -> gpd.GeoDataFrame:
@@ -109,9 +123,27 @@ def load_backend_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame | None]:
     boundaries = _load_boundaries()
     features = _load_features()
     preds = _load_predictions()
+    gold_preds = _load_gold_predictions()
     shap_df = _load_shap()
 
     merged_features = features.merge(preds, on=["lga_name", "year"], how="left")
+    if not gold_preds.empty:
+        gold_cols = [
+            c
+            for c in [
+                "lga_name",
+                "year",
+                "risk_score",
+                "risk_score_total",
+                "confidence_pct",
+                "confidence_reason_codes",
+                "model_version",
+                "estimate_as_of",
+            ]
+            if c in gold_preds.columns
+        ]
+        merged_features = merged_features.drop(columns=[c for c in ["risk_score", "risk_prob"] if c in merged_features.columns])
+        merged_features = merged_features.merge(gold_preds[gold_cols], on=["lga_name", "year"], how="left")
     if "risk_score" not in merged_features.columns:
         merged_features["risk_score"] = pd.to_numeric(merged_features.get("risk_prob"), errors="coerce")
     merged_features["risk_score"] = pd.to_numeric(merged_features["risk_score"], errors="coerce").clip(0, 1)
@@ -269,6 +301,8 @@ def get_ranked_hotspots(
                 "cov": _safe_float(row.get("coverage_5km")),
                 "towers": _safe_float(row.get("towers_per_10k")),
                 "year": row.get("year"),
+                "confidence_pct": _safe_float(row.get("confidence_pct")),
+                "confidence_reason_codes": row.get("confidence_reason_codes"),
             }
         )
     return hotspots
@@ -299,6 +333,8 @@ def get_lga_detail(
         "towers": _safe_float(row.get("towers_per_10k")),
         "density": _safe_float(row.get("population_density")),
         "year": row.get("year"),
+        "confidence_pct": _safe_float(row.get("confidence_pct")),
+        "confidence_reason_codes": row.get("confidence_reason_codes"),
         "shap": shap_values,
     }
 
