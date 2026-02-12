@@ -18,3 +18,12 @@ streamlit_*.log
 !data/raw/lga_boundaries.geojson
 !data/processed/lga_features.csv
 !data/processed/lga_predictions.csv
+
+!models/
+!models/risk_model_v1.2/
+!models/risk_model_v1.2/model.joblib
+!models/risk_model_v1.2/model_card.md
+!models/risk_model_v1.2/feature_importance.csv
+!models/risk_model_v1.2/feature_list_hash.txt
+!models/risk_model_v1.2/calibration_plots.png
+!models/risk_model_v1.2/metrics.json

@@ -69,6 +69,11 @@ def main() -> None:
     _init_session_state()
     _hydrate_from_query_params()
 
+    with st.sidebar:
+        st.markdown("### Transparency")
+        st.page_link("pages/1_📊_Methodology.py", label="📊 Methodology")
+        st.page_link("pages/2_📖_Glossary.py", label="📖 Glossary")
+
     geo_df, shap_df = load_backend_data()
     if st.session_state.get("hd_year") is None:
         st.session_state["hd_year"] = latest_year(geo_df)
