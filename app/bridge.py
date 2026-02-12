@@ -21,6 +21,8 @@ from data_api import (
 
 APP_DIR = Path(__file__).resolve().parent
 HTML_PATH = APP_DIR / "health_desert_ui.html"
+CSS_PATH = APP_DIR / "health_desert_ui.css"
+JS_PATH = APP_DIR / "health_desert_ui.js"
 
 
 def _json_default(obj: Any) -> str:
@@ -110,8 +112,18 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
 def inject_data_to_html(html_path: Path, data: dict[str, Any]) -> str:
     html = html_path.read_text(encoding="utf-8")
     injection = f"<script>window.__INITIAL_DATA__ = {json.dumps(data, default=_json_default)};</script>"
+
+    css_text = CSS_PATH.read_text(encoding="utf-8")
+    js_text = JS_PATH.read_text(encoding="utf-8")
+
+    if "<!-- APP_STYLE -->" in html:
+        html = html.replace("<!-- APP_STYLE -->", f"<style>\n{css_text}\n</style>")
+    if "<!-- APP_SCRIPT -->" in html:
+        html = html.replace("<!-- APP_SCRIPT -->", f"<script>\n{js_text}\n</script>")
+
     if "<!-- DATA_INJECTION -->" in html:
-        return html.replace("<!-- DATA_INJECTION -->", injection)
+        html = html.replace("<!-- DATA_INJECTION -->", injection)
+        return html
     if "</head>" in html:
         return html.replace("</head>", f"{injection}\n</head>", 1)
     return injection + html

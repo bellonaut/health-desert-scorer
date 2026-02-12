@@ -1,150 +1,128 @@
-## Nigeria Health Desert Risk Scorer
+# Health Desert Scorer (Nigeria)
 
-Nigeria faces preventable mortality partly because people cannot reach care in time. This project is an evolving research prototype that links maternal/child health outcomes with geographic access, facility density, and basic connectivity to identify LGAs at elevated risk of “health deserts.” It is part of my MSc Data Science work, designed to translate public health intelligence into decision-support signals while remaining grounded in the realities of data quality, displacement, and infrastructure variability. The goal is not a deployed system—it is a research-grade foundation for understanding where distance, scarcity, and connectivity intersect.
+A simple map tool to help you spot Nigerian LGAs where people may face **higher barriers to healthcare access**.
 
-> This is a research-driven prototype, not an operational tool. DHS microdata and cluster coordinates must **never** be committed; only aggregated LGA-level outputs belong in `data/processed/`. DHS cluster locations are displaced and this pipeline respects that by operating on aggregated outputs only.
-
----
-
-### Problem Statement
-Nigeria’s health outcomes vary sharply by geography. Many LGAs face a compounding mix of long travel times, low facility density, and weak connectivity that can delay or prevent care—particularly for maternal and child health. The challenge is to identify these high-risk areas consistently, using transparent, spatially aware methods that can inform planning without overstating precision.
-
-### Why This Matters (Nigeria + global health)
-Nigeria accounts for a significant share of global maternal and child mortality, and geographic access remains a critical bottleneck. The same access-and-connectivity dynamics appear across low-resource settings worldwide. A rigorous, Nigeria-focused prototype can serve as a template for how data science and geospatial intelligence support health equity and policy decisions without becoming a “black box.”
-
-### What This Tool Does
-This project constructs LGA-level features from population, facility, and connectivity data; trains interpretable and boosted models; and produces a risk score intended for analysis and exploration. The output is a map-ready signal that can support decision-support discussions, not clinical guidance.
-
-### Who This Is For
-- **Public health planners** — to prioritize areas where access gaps may align with poorer outcomes.
-- **Policy analysts** — to compare risk patterns with existing investments and programs.
-- **NGOs** — to target outreach and evaluate geographic coverage.
-- **Infrastructure planners** — to surface where health facility planning intersects with road and connectivity gaps.
+🌐 **Live app:** https://bashir-healthdesert.streamlit.app/
 
 ---
 
-### Data Sources
-- **DHS (with approval)** — aggregated outcomes derived from DHS microdata (approval documentation is kept private and is not part of this repository).
-- **WorldPop** — population density and distribution.
-- **GRID3 / facility data** — health facility locations and basic attributes.
-- **OpenCellID** — proxy measures for connectivity and coverage.
+## Why I made this
+I built this because many poor health outcomes are not only medical problems — they are also **distance, facility, and connectivity** problems.
 
-### Methods
-- **Feature engineering**: access metrics, facility density, distance-based measures, and population-weighted indicators.
-- **Models**: logistic regression for interpretability plus XGBoost for non-linear patterns.
-- **Spatial aggregation**: LGA-level summarization aligned with displaced cluster data.
-- **Risk modeling**: produces relative risk signals intended for comparison, not diagnosis.
-
-### Ethics & Limitations
-- **Aggregated data only**: no individual-level or personally identifiable information.
-- **Not clinical guidance**: outputs are for planning and research use.
-- **Early-stage prototype**: methods and assumptions are evolving; results must be validated.
-
-### Data Handling & Privacy
-- **No restricted data in repo**: DHS approval documentation, microdata, and cluster coordinates are intentionally excluded.
-- **Storage guidance**: place any restricted inputs locally under `data/raw/` and keep them out of version control.
+This project helps surface where access constraints may be strongest, so decisions about outreach, staffing, and investment can start from evidence.
 
 ---
 
-### Why I Built This
-I built this as a systems-thinking exercise in health equity: to link infrastructure, access, and outcomes in a way that can support decision-support conversations. Nigeria’s health gaps are not just clinical; they’re logistical and geographic. This prototype helps me explore how data science can map those constraints and translate them into actionable, evidence-aware signals.
+## Who can use this
+- **Curious Nigerians**: understand health access patterns in your state/LGA.
+- **Nurses & frontline coordinators**: identify communities that may need outreach first.
+- **Policy teams & government**: prioritize limited resources more transparently.
+- **NGOs & donors**: plan location-aware interventions.
+- **Researchers & students**: explore spatial health inequality.
 
 ---
 
-**Impact highlights:**
-- Aggregates DHS-derived signals into LGA-level risk features with displacement-aware handling.
-- Combines interpretable models and boosted trees for robust, explainable baselines.
-- Integrates facility density, distance, and connectivity proxies into a unified access profile.
-- Designed for public health and policy analysis rather than clinical prediction.
-- Built as an evolving research prototype with clear limitations and ethical safeguards.
+## Quick start (60 seconds)
+1. Open the app: https://bashir-healthdesert.streamlit.app/
+2. Select a **State** (or keep *All Nigeria*).
+3. Select a **Year**.
+4. Use the left panel to:
+   - search an LGA,
+   - switch focus (all risk, child mortality, facility access, connectivity, 5km coverage),
+   - view highest-need LGAs.
+5. Use map tabs (**Risk score**, **Facilities**, **Population**) to explore different views.
 
 ---
 
-### Model Card (Summary)
-- **Purpose**: identify LGAs with elevated access-related risk for maternal/child health outcomes.
-- **Inputs**: aggregated DHS-derived outcomes, facility density metrics, access distances, population weights, and connectivity proxies.
-- **Outputs**: LGA-level relative risk scores and model probabilities for comparative analysis.
-- **Interpretation notes**: scores are comparative signals; they do not diagnose conditions or imply causality.
-- **Limitations**: relies on aggregated data, displaced clusters, and proxy connectivity data; not validated for clinical decision-making.
+## What things mean (key definitions)
+- **Health desert (in this project):** an area where people are more likely to face practical barriers to care (distance, fewer facilities, weaker connectivity, and related risk signals).
+- **Risk score:** a **relative planning score** (not a diagnosis) showing which LGAs may need attention sooner compared with others.
+- **Facilities layer:** map view showing healthcare facility presence/distribution.
+- **Population layer:** map view showing population pressure/distribution context.
+- **Facility access (focus):** view emphasizing likely constraints in reaching nearby care.
+- **Connectivity (focus):** view emphasizing weak signal/network proxy areas that can affect care coordination.
+- **5km coverage (focus):** view related to how much population/facility access is likely within a 5km distance band.
+- **Highest-need list:** ranked LGAs with comparatively higher risk in the current filter.
+- **LGA:** Local Government Area.
 
 ---
 
-### Real-World Use Cases
-- **Resource allocation**: identify LGAs that may need additional outreach or facility support.
-- **Outreach targeting**: prioritize community health programs where access constraints are severe.
-- **Health infrastructure planning**: inform facility placement or mobile clinic strategies.
-- **Telecom + health partnerships**: connect weak connectivity zones with digital health initiatives.
-- **Policy analysis**: compare planned investments against risk patterns for equity impacts.
+## How to read the map
+- **Green** = relatively lower risk.
+- **Yellow/Orange** = medium concern.
+- **Red** = relatively higher risk / likely higher access constraints.
+
+> Important: this is a decision-support signal for planning and prioritization. It does **not** diagnose people or replace local field knowledge.
 
 ---
 
+## Screenshot walkthrough
+A quick visual tour of the tool in action:
+
+### 1) National overview + selected LGA context
+Shows the risk map, highest-need list, and detailed card for a selected LGA.
+
+![National overview with selected LGA details](docs/images/screenshot-overview-selected-lga.png)
+
+### 2) Lower-risk example (local detail panel)
+Shows how a lower-risk LGA looks in the detail panel, so users can compare extremes.
+
+![Lower-risk LGA example with map tooltip](docs/images/screenshot-low-risk-example.png)
+
+### 3) Mobile-friendly side panel view
+Shows compact ranking + metrics view for smaller screens.
+
+![Mobile-like panel view with metrics](docs/images/screenshot-mobile-panel.png)
+
+### 4) Facility-access focus in search workflow
+Shows filtering by **Facility access** and searching within a state context.
+
+![Facility-access focus and search workflow](docs/images/screenshot-facility-access-focus.png)
+
 ---
 
-### Portfolio Positioning Statement
-This project shows that I approach data science as a systems problem: combining geospatial data engineering, interpretable modeling, and policy-aware framing to address health equity. It reflects research depth, technical rigor, and a commitment to building decision-support tools that are honest about limitations yet useful for real-world planning.
+## How different users can apply it
+- **Layperson:** compare your LGA with nearby LGAs and ask better local health questions.
+- **Nurse/PHC lead:** shortlist high-risk LGAs for outreach, ANC/PNC follow-up, or mobile clinic planning.
+- **Policy official:** compare high-risk zones with current budget/program placement.
+- **Researcher:** use as a hypothesis-generating layer before deeper causal analysis.
 
-> Recommended Python: 3.11 or 3.12 on Windows for geospatial dependencies.
+---
 
-### Run instructions
+## Responsible use
+- This is a **prototype for planning**, not a clinical triage tool.
+- Always combine with field realities: security, roads, seasonality, staffing quality, and local validation.
+- Treat outputs as a **starting point**, not final truth.
 
-### Shippable quickstart (Mac/Linux)
+---
 
-> This script sets up a local virtualenv, downloads the open datasets, builds features, trains models, and launches the Streamlit app.
-
+## Run locally
 ```bash
 ./scripts/run_demo.sh
 ```
 
-### Windows quickstart
-
-```powershell
+Manual setup:
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate  # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python scripts\create_mock_dhs.py
-python scripts\download_open_data.py
+python scripts/create_mock_dhs.py
+python scripts/download_open_data.py
 python -m src.data.build_features
-python -m src.models.train_models
-streamlit run app\app.py
+streamlit run app/app.py
 ```
 
-1. **Create mock DHS clusters (optional for demo data)**
-   ```bash
-   python scripts/create_mock_dhs.py
-   ```
-2. **Download or place required inputs**
-   ```bash
-   python scripts/download_open_data.py
-   ```
-   Place `lga_boundaries.geojson` and `health_facilities.geojson` in `data/raw/`.
-3. **Build features**
-   ```bash
-   python -m src.data.build_features
-   ```
-4. **Train models**
-   ```bash
-   python -m src.models.train_models
-   ```
-5. **Run app**
-   ```bash
-   streamlit run app/app.py
-   ```
+---
 
-### Stage A Baseline (frozen)
-- Uses mock DHS-derived labels (demo only); access metrics come from real boundaries/facilities inputs.
-- Outputs: `data/processed/lga_features.csv` and `docs/build_features_report.json`.
-- Pipeline runner: `python scripts/create_mock_dhs.py`, `python scripts/download_open_data.py`, then `python -m src.data.build_features` (or use `scripts/run_stage_a.ps1` on Windows).
-- Intended as a reproducible baseline before any model changes; keep DHS microdata out of the repo.
+## Data, ethics, and limits
+- Repo stores aggregated outputs only.
+- Do **not** commit restricted DHS microdata or sensitive coordinates.
+- `data/raw/` stays gitignored (aside from tiny demo boundaries); keep DHS downloads local under the DHS data-use agreement.
+- Results are exploratory and should be validated before policy commitments.
 
-### DHS export notes
-- `scripts/export_dhs_clusters.py` reads BR files with `convert_categoricals=False` because the 2013 BR has duplicate value labels (e.g., `v131`) that crash pandas category conversion.
-- Region codes `v024` are mapped via the label dictionary when present (falling back to the fixed 1–6 region code map) so the North/South split works whether `v024` is numeric or labeled.
+---
 
-### RUN ORDER
-- [ ] `python scripts/create_mock_dhs.py`
-- [ ] `python scripts/download_open_data.py`
-- [ ] `python scripts/aggregate_population.py`
-- [ ] *(optional, for tower metrics)* `python -m src.data.build_features` will ingest `data/raw/opencellid.csv.gz` if present
-- [ ] `python -m src.data.build_features`
-- [ ] `python -m src.models.train_models`
-- [ ] `streamlit run app/app.py`
+## Contact
+If you want to collaborate or use this in a program/research workflow:
+
+- 🌍 **www.bashir.bio**
