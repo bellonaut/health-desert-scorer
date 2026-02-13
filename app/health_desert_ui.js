@@ -4,12 +4,21 @@ const meta = injected.meta || {};
 const lgas = Array.isArray(injected.lgas) ? injected.lgas : [];
 const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [];
 const stateOptions = ['All Nigeria', ...(injected.states || [])];
+const urlParams = new URLSearchParams(window.parent.location.search);
+const testingMode = ['1', 'true', 'yes'].includes((urlParams.get('testing') || '').toLowerCase());
+const testPersona = urlParams.get('persona') || 'unknown';
+let testSession = urlParams.get('session') || '';
+if (testingMode && !testSession) {
+  testSession = String(Date.now());
+}
 
 let currentState = meta.state_filter || 'All Nigeria';
 let currentDepth = Number(meta.depth || 0);
 let currentFocus = meta.focus || 'All risk';
 let currentYear = meta.year != null ? String(meta.year) : '2018';
 let currentLayer = 'Risk score';
+let isMobile = false;
+let pendingEvent = null;
 
 const lgaById = new Map(lgas.map((l) => [String(l.id), l]));
 const featureLayerById = new Map();
@@ -62,7 +71,14 @@ function safeNum(value) {
   return Number(value);
 }
 
-function riskLabel(r) {
+const hasTowerConnectivityData = lgas.some((lga) => {
+  const value = safeNum(lga.towers);
+  return value != null && value > 0;
+});
+
+function riskLabel(r, total) {
+  const t = safeNum(total);
+  if (t != null) return t.toFixed(1);
   return r == null || Number.isNaN(Number(r)) ? 'NA' : (Number(r) * 100).toFixed(0);
 }
 
@@ -143,6 +159,13 @@ function syncHeader() {
     chip.setAttribute('aria-pressed', String(active));
   });
 
+  const footnote = document.getElementById('data-footnote');
+  if (footnote) {
+    const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version;
+    const updated = meta.data_last_updated ? `Updated ${meta.data_last_updated}` : 'Update date unknown';
+    footnote.textContent = `DHS 2013/2018 · NHFR · OpenCellID · Model ${modelVersion || 'v1.2'} · ${updated}`;
+  }
+
   setApplyStatus('Applied', 'applied');
 }
 
@@ -164,12 +187,24 @@ function buildStateUrl() {
   params.set('focus', currentFocus);
   params.set('depth', String(currentDepth));
   params.set('year', currentYear);
+  params.set('mobile', isMobile ? '1' : '0');
 
   if (selectedLGA?.id) params.set('lga', String(selectedLGA.id));
   else params.delete('lga');
 
   if (compareLGAs.length) params.set('compare', compareLGAs.map((l) => l.id).join(','));
   else params.delete('compare');
+
+  if (testingMode) {
+    params.set('testing', '1');
+    if (testPersona) params.set('persona', testPersona);
+    if (testSession) params.set('session', testSession);
+    if (pendingEvent) {
+      params.set('evt', JSON.stringify(pendingEvent));
+    } else {
+      params.delete('evt');
+    }
+  }
 
   return `${window.parent.location.pathname}?${params.toString()}`;
 }
@@ -185,6 +220,7 @@ function flushStateToPython() {
   }
 
   stateSyncLocked = true;
+  pendingEvent = null;
   window.parent.location.replace(pendingStateUrl);
 }
 
@@ -210,10 +246,20 @@ function pushStateToPython({ immediate = false } = {}) {
   }, 250);
 }
 
+function queueEvent(type, details = {}) {
+  if (!testingMode) return;
+  pendingEvent = { type, details };
+  pushStateToPython();
+}
+
 function hotspotsBase() {
   if (hotspotsPayload.length) return hotspotsPayload;
   return [...lgas]
-    .sort((a, b) => (Number(b.risk ?? 0) - Number(a.risk ?? 0)))
+    .sort((a, b) => {
+      const aScore = safeNum(a.risk_total) != null ? safeNum(a.risk_total) / 10 : Number(a.risk ?? 0);
+      const bScore = safeNum(b.risk_total) != null ? safeNum(b.risk_total) / 10 : Number(b.risk ?? 0);
+      return bScore - aScore;
+    })
     .map((l, i) => ({ ...l, rank: i + 1 }));
 }
 
@@ -263,9 +309,11 @@ function renderHotspots() {
 
     const badge = document.createElement('div');
     const risk = safeNum(lga.risk);
-    const bucket = risk != null && risk > 0.66 ? 'risk-high' : risk != null && risk > 0.33 ? 'risk-med' : 'risk-low';
+    const riskTotal = safeNum(lga.risk_total);
+    const riskScore = riskTotal != null ? riskTotal / 10 : risk;
+    const bucket = riskScore != null && riskScore > 0.66 ? 'risk-high' : riskScore != null && riskScore > 0.33 ? 'risk-med' : 'risk-low';
     badge.className = `risk-badge ${bucket}`;
-    badge.textContent = riskLabel(risk);
+    badge.textContent = riskLabel(risk, riskTotal);
 
     scoreWrap.append(confEl, badge);
     card.append(rank, info, scoreWrap);
@@ -317,6 +365,58 @@ function percentileRank(field, value) {
   return Math.round((idx / Math.max(vals.length - 1, 1)) * 100);
 }
 
+function buildInterventions(lga) {
+  const mapping = {
+    'Low facility density': [
+      'Mobile clinic outreach',
+      'Primary health center upgrades',
+      'Community health worker expansion',
+    ],
+    'Limited facility proximity coverage': [
+      'New fixed posts in low-coverage wards',
+      'Targeted outreach for isolated settlements',
+      'Transport support for referrals',
+    ],
+    'Elevated under-5 mortality indicators': [
+      'Maternal and child health outreach',
+      'Immunization drives',
+      'Nutrition and antenatal support',
+    ],
+    'Limited mobile network coverage': [
+      'Offline-first health data tools',
+      'Community radio health programs',
+      'USSD or SMS service channels',
+    ],
+  };
+
+  const barriers = String(lga.primary_barriers || '')
+    .split('|')
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  const items = [];
+  barriers.forEach((barrier) => {
+    if (mapping[barrier]) {
+      items.push({ title: barrier, actions: mapping[barrier] });
+    }
+  });
+
+  if (!items.length) {
+    return '';
+  }
+
+  return items
+    .map((item) => `
+      <div class=\"intervention-card\">
+        <div class=\"intervention-title\">${escapeHtml(item.title)}</div>
+        <ul class=\"intervention-list\">
+          ${item.actions.map((act) => `<li>${escapeHtml(act)}</li>`).join('')}
+        </ul>
+      </div>
+    `)
+    .join('');
+}
+
 function renderDetail() {
   const inner = document.getElementById('detail-inner');
   if (!inner) return;
@@ -332,7 +432,7 @@ function renderDetail() {
   const u5Pct = 100 - (percentileRank('u5mr', safeNum(lga.u5mr)) ?? 50);
   const covPct = percentileRank('cov', safeNum(lga.cov)) ?? 50;
 
-  let action = 'Review these access barriers alongside local knowledge before making planning decisions.';
+  let action = lga.recommendation || 'Review these access barriers alongside local knowledge before making planning decisions.';
   if (safeNum(lga.fac) != null && safeNum(lga.dist) != null && Number(lga.fac) < 0.5 && Number(lga.dist) > 5) {
     action = 'Very few facilities and long travel times. Consider mobile clinic deployment.';
   } else if (safeNum(lga.u5mr) != null && Number(lga.u5mr) > 150) {
@@ -346,10 +446,12 @@ function renderDetail() {
     : [];
 
   const riskNum = safeNum(lga.risk);
+  const riskTotal = safeNum(lga.risk_total);
   const conf = confidenceBadge(lga.confidence_pct);
-  const riskClass = riskNum != null && riskNum > 0.66
+  const riskScore = riskTotal != null ? riskTotal / 10 : riskNum;
+  const riskClass = riskScore != null && riskScore > 0.66
     ? 'metric-risk-red'
-    : riskNum != null && riskNum > 0.33
+    : riskScore != null && riskScore > 0.33
       ? 'metric-risk-yellow'
       : 'metric-risk-green';
 
@@ -360,13 +462,23 @@ function renderDetail() {
     { label: '5km coverage', pct: covPct },
   ];
 
+  const interventionsHtml = buildInterventions(lga);
+  const interventionsSection = interventionsHtml
+    ? `
+    <div class="section-label">What can help</div>
+    <div class="intervention-grid">
+      ${interventionsHtml}
+    </div>
+  `
+    : '';
+
   inner.innerHTML = `
     <div class="detail-header">
       <div>
         <div class="detail-lga">${escapeHtml(sanitizeText(lga.name, 'Unknown LGA'))}</div>
         <div class="detail-state-tag">
           ${escapeHtml(sanitizeText(lga.state, 'Unknown state'))} · Risk score:
-          <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum))}</span>
+          <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum, riskTotal))}</span>
         </div>
         <div class="detail-state-tag">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)}</div>
       </div>
@@ -416,6 +528,8 @@ function renderDetail() {
     </div>
     <p class="action-note">Decision-support only. Always combine with local knowledge and community input.</p>
 
+    ${interventionsSection}
+
     <div class="depth-section ${currentDepth >= 2 && shapRows.length ? 'visible' : ''}" id="shap-section">
       <div class="section-label">Feature contribution (SHAP)</div>
       ${shapRows.length
@@ -447,12 +561,14 @@ function setDepth(depth) {
   if (selectedLGA) renderDetail();
   renderMap();
   pushStateToPython();
+  queueEvent('depth_change', { depth: currentDepth });
 }
 
 function setFocus(focus) {
   currentFocus = focus;
   syncHeader();
   pushStateToPython();
+  queueEvent('focus_change', { focus: currentFocus });
 }
 
 function selectLGA(id) {
@@ -469,6 +585,7 @@ function selectLGA(id) {
   openDrawer();
   renderMap();
   pushStateToPython();
+  queueEvent('lga_select', { id: String(id), name: selectedLGA?.name });
 }
 
 function addCompareSlot() {
@@ -567,7 +684,9 @@ function valueForLayer(lga, layer) {
   if (!lga) return null;
   switch (layer) {
     case 'Facilities': return safeNum(lga.fac);
-    case 'Population': return safeNum(lga.density ?? lga.pop);
+    case 'Connectivity':
+      // Fall back to 5km coverage proxy when tower feed is unavailable in this release.
+      return hasTowerConnectivityData ? safeNum(lga.towers) : safeNum(lga.cov);
     case 'Towers': return safeNum(lga.towers);
     case 'SHAP':
       if (!lga.shap) return null;
@@ -579,7 +698,7 @@ function valueForLayer(lga, layer) {
 function layerLabel(layer) {
   switch (layer) {
     case 'Facilities': return 'Facilities / 10k';
-    case 'Population': return 'Population';
+    case 'Connectivity': return hasTowerConnectivityData ? 'Towers / 10k' : 'Connectivity (5km coverage)';
     case 'Towers': return 'Towers / 10k';
     case 'SHAP': return 'SHAP';
     default: return 'Risk score';
@@ -695,6 +814,318 @@ function renderMap() {
   });
 }
 
+function renderMapTable() {
+  const tableWrap = document.getElementById('map-table');
+  if (!tableWrap) return;
+  const rows = lgas.slice(0, 200);
+  const header = `
+    <thead>
+      <tr>
+        <th>LGA</th>
+        <th>State</th>
+        <th>Risk score</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+  `;
+  const body = `
+    <tbody>
+      ${rows.map((lga) => {
+        const riskTotal = safeNum(lga.risk_total);
+        const risk = riskLabel(lga.risk, riskTotal);
+        return `
+          <tr>
+            <td>${escapeHtml(sanitizeText(lga.name, 'Unknown'))}</td>
+            <td>${escapeHtml(sanitizeText(lga.state, ''))}</td>
+            <td>${escapeHtml(risk)}</td>
+            <td>${escapeHtml(String(safeNum(lga.confidence_pct) ?? '—'))}</td>
+          </tr>
+        `;
+      }).join('')}
+    </tbody>
+  `;
+  tableWrap.innerHTML = `<table class="map-table-inner">${header}${body}</table>`;
+}
+
+function toggleMapTable() {
+  const tableWrap = document.getElementById('map-table');
+  const toggleBtn = document.getElementById('map-table-toggle');
+  if (!tableWrap || !toggleBtn) return;
+  const isOpen = tableWrap.classList.toggle('open');
+  tableWrap.setAttribute('aria-hidden', String(!isOpen));
+  toggleBtn.setAttribute('aria-expanded', String(isOpen));
+  toggleBtn.textContent = isOpen ? 'Hide map table' : 'View map as table';
+  if (isOpen) renderMapTable();
+}
+
+let currentExportMode = 'csv';
+
+function buildShareUrl() {
+  const params = new URLSearchParams();
+  params.set('state', currentState);
+  params.set('focus', currentFocus);
+  params.set('depth', String(currentDepth));
+  params.set('year', currentYear);
+  if (selectedLGA?.id) params.set('lga', String(selectedLGA.id));
+  if (compareLGAs.length) params.set('compare', compareLGAs.map((l) => l.id).join(','));
+  params.set('mobile', isMobile ? '1' : '0');
+  return `${window.parent.location.origin}/static/share_preview.html?${params.toString()}`;
+}
+
+function updateShareDrawer() {
+  const shareUrl = buildShareUrl();
+  const urlEl = document.getElementById('share-url');
+  if (urlEl) urlEl.textContent = shareUrl;
+  const x = document.getElementById('share-x');
+  const li = document.getElementById('share-linkedin');
+  const wa = document.getElementById('share-whatsapp');
+  if (x) x.href = `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}`;
+  if (li) li.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`;
+  if (wa) wa.href = `https://wa.me/?text=${encodeURIComponent(shareUrl)}`;
+}
+
+function openOverlay(id) {
+  const overlay = document.getElementById(id);
+  if (overlay) {
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closeOverlay(id) {
+  const overlay = document.getElementById(id);
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function buildExportMetadata() {
+  const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version || 'v1.2';
+  const updated = meta.data_last_updated || 'Unknown';
+  return [
+    '# Health Desert Scorer - Data Export',
+    `# Generated: ${new Date().toISOString()}`,
+    `# Filters: State=${currentState}, Year=${currentYear}, Focus=${currentFocus}`,
+    `# LGAs included: ${lgas.length}`,
+    '#',
+    '# IMPORTANT DISCLAIMER:',
+    '# This is a planning tool output. Scores indicate access barriers, not health outcomes.',
+    '# Always validate with local knowledge before decisions.',
+    '#',
+    '# Data Sources: DHS 2013, 2018 · NHFR 2020 · WorldPop 2020 · OpenCellID 2019',
+    `# Model: ${modelVersion}`,
+    `# Data last updated: ${updated}`,
+    '# Citation: Bello, B.A. (2026). Health Desert Scorer.',
+    '',
+  ];
+}
+
+function exportFieldDefs() {
+  return [
+    { key: 'name', label: 'lga_name' },
+    { key: 'state', label: 'state_name' },
+    { key: 'year', label: 'year' },
+    { key: 'risk_total', label: 'risk_score_total' },
+    { key: 'risk', label: 'risk_score' },
+    { key: 'fac', label: 'facilities_per_10k' },
+    { key: 'dist', label: 'avg_distance_km' },
+    { key: 'u5mr', label: 'u5mr_mean' },
+    { key: 'cov', label: 'coverage_5km' },
+    { key: 'towers', label: 'towers_per_10k' },
+    { key: 'confidence_pct', label: 'confidence_pct' },
+    { key: 'confidence_reason_codes', label: 'confidence_reason_codes' },
+    { key: 'primary_barriers', label: 'primary_barriers' },
+    { key: 'recommendation', label: 'recommendation' },
+  ];
+}
+
+function buildExportRows() {
+  return lgas.map((lga) => {
+    const row = { ...lga };
+    row.risk_total = safeNum(lga.risk_total);
+    row.risk = safeNum(lga.risk);
+    return row;
+  });
+}
+
+function buildCsvExport() {
+  const headers = exportFieldDefs().map((f) => f.label).join(',');
+  const rows = buildExportRows().map((row) =>
+    exportFieldDefs().map((f) => csvSafe(row[f.key] ?? '')).join(',')
+  );
+  const csv = [...buildExportMetadata(), headers, ...rows].join('\n');
+  return { name: `health_desert_${currentState}_${currentYear}.csv`, data: csv, type: 'text/csv' };
+}
+
+function buildGeoJsonExport() {
+  const gj = normalizeGeoJson();
+  if (!gj) {
+    return { name: 'health_desert.geojson', data: JSON.stringify({ type: 'FeatureCollection', features: [] }), type: 'application/geo+json' };
+  }
+  const dataLookup = new Map(lgas.map((l) => [String(l.id), l]));
+  const metadata = {
+    export_date: new Date().toISOString(),
+    filters: { state: currentState, year: currentYear, focus: currentFocus },
+    model_version: meta.model_version || 'v1.2',
+  };
+  const features = gj.features.map((f) => {
+    const id = String(f.properties?.lga_uid ?? f.properties?.lga_name ?? '');
+    const data = dataLookup.get(id);
+    return {
+      ...f,
+      properties: {
+        ...f.properties,
+        ...(data || {}),
+        export_metadata: JSON.stringify(metadata),
+      },
+    };
+  });
+  const out = { ...gj, features };
+  return { name: `health_desert_${currentState}_${currentYear}.geojson`, data: JSON.stringify(out), type: 'application/geo+json' };
+}
+
+function buildSummaryExport() {
+  const rows = buildExportRows();
+  const scores = rows.map((r) => safeNum(r.risk_total) ?? (safeNum(r.risk) != null ? safeNum(r.risk) * 10 : null)).filter((v) => v != null);
+  const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  const high = scores.filter((v) => v >= 7).length;
+  const medium = scores.filter((v) => v >= 4 && v < 7).length;
+  const low = scores.filter((v) => v < 3).length;
+  const top = [...rows].sort((a, b) => (safeNum(b.risk_total) ?? 0) - (safeNum(a.risk_total) ?? 0)).slice(0, 10);
+
+  let report = '';
+  report += 'HEALTH DESERT SCORER - SUMMARY REPORT\\n';
+  report += '========================================\\n\\n';
+  report += `Generated: ${new Date().toISOString()}\\n`;
+  report += `Geographic Scope: ${currentState}\\n`;
+  report += `Year: ${currentYear}\\n`;
+  report += `Focus Mode: ${currentFocus}\\n\\n`;
+  report += 'SUMMARY STATISTICS\\n';
+  report += '----------------------------------------\\n';
+  report += `Total LGAs: ${rows.length}\\n`;
+  report += `Average Risk Score: ${avg.toFixed(2)} / 10\\n`;
+  report += `High Risk (7-10): ${high}\\n`;
+  report += `Medium Risk (4-6): ${medium}\\n`;
+  report += `Lower Risk (0-3): ${low}\\n\\n`;
+  report += 'TOP 10 HIGHEST-NEED LGAs\\n';
+  report += '----------------------------------------\\n';
+  top.forEach((row, idx) => {
+    const score = safeNum(row.risk_total) ?? (safeNum(row.risk) != null ? safeNum(row.risk) * 10 : null);
+    report += `${idx + 1}. ${row.name} (${row.state}) - ${score != null ? score.toFixed(2) : 'NA'}\\n`;
+  });
+  report += '\\nIMPORTANT DISCLAIMER\\n';
+  report += 'This is a planning tool output, not a diagnosis system.\\n';
+  report += 'Always validate with local knowledge and field checks.\\n';
+  return { name: `health_desert_report_${currentState}_${currentYear}.txt`, data: report, type: 'text/plain' };
+}
+
+async function buildBundleExport() {
+  const zip = new JSZip();
+  const csv = buildCsvExport();
+  const geojson = buildGeoJsonExport();
+  const summary = buildSummaryExport();
+  zip.file('data.csv', csv.data);
+  zip.file('data.geojson', geojson.data);
+  zip.file('summary_report.txt', summary.data);
+  zip.file('README.txt', `Health Desert Scorer Export Bundle\\nGenerated: ${new Date().toISOString()}\\nFilters: ${currentState} · ${currentYear} · ${currentFocus}\\n`);
+  const content = await zip.generateAsync({ type: 'blob' });
+  return { name: `health_desert_bundle_${currentState}_${currentYear}.zip`, data: content, type: 'application/zip' };
+}
+
+async function downloadExport() {
+  let payload;
+  if (currentExportMode === 'csv') payload = buildCsvExport();
+  if (currentExportMode === 'geojson') payload = buildGeoJsonExport();
+  if (currentExportMode === 'summary') payload = buildSummaryExport();
+  if (currentExportMode === 'bundle') payload = await buildBundleExport();
+  if (!payload) return;
+
+  const blob = payload.data instanceof Blob ? payload.data : new Blob([payload.data], { type: payload.type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = payload.name;
+  a.click();
+  queueEvent('export', { format: currentExportMode });
+}
+
+function setExportMode(mode) {
+  currentExportMode = mode;
+  document.querySelectorAll('.export-chip').forEach((chip) => {
+    const active = chip.dataset.export === mode;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', String(active));
+  });
+  const help = document.getElementById('export-help');
+  if (!help) return;
+  const text = {
+    csv: 'CSV is compatible with Excel and Google Sheets.',
+    geojson: 'GeoJSON works in GIS tools like QGIS or ArcGIS.',
+    summary: 'Summary is a text report for proposals and briefs.',
+    bundle: 'Bundle includes CSV, GeoJSON, summary, and README.',
+  };
+  help.textContent = text[mode] || '';
+}
+
+const tourSteps = [
+  {
+    title: 'Welcome',
+    body: 'This tool highlights LGAs facing healthcare access barriers. It is designed for planning, not diagnosis.',
+  },
+  {
+    title: 'Step 1 of 4: The map',
+    body: 'The map shows relative access barriers. Click any LGA to see details and confidence.',
+  },
+  {
+    title: 'Step 2 of 4: Filters',
+    body: 'Use State, Year, and Focus to explore different access barriers.',
+  },
+  {
+    title: 'Step 3 of 4: Highest-need list',
+    body: 'The list ranks LGAs by the selected focus so you can prioritize outreach.',
+  },
+  {
+    title: 'Step 4 of 4: Ready',
+    body: 'Try selecting a state, review the top LGAs, and export a list for planning.',
+  },
+];
+
+let tourIndex = 0;
+
+function openTour() {
+  const overlay = document.getElementById('tour-overlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+  renderTourStep();
+}
+
+function closeTour(markComplete = false) {
+  const overlay = document.getElementById('tour-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (markComplete) {
+    localStorage.setItem('hd_tour_v1_completed', '1');
+  }
+}
+
+function renderTourStep() {
+  const titleEl = document.getElementById('tour-step-title');
+  const bodyEl = document.getElementById('tour-step-body');
+  if (!titleEl || !bodyEl) return;
+  const step = tourSteps[tourIndex] || tourSteps[0];
+  titleEl.textContent = step.title;
+  bodyEl.textContent = step.body;
+  const nextBtn = document.getElementById('tour-next-btn');
+  if (nextBtn) nextBtn.textContent = tourIndex >= tourSteps.length - 1 ? 'Start' : 'Next';
+}
+
+function maybeStartTour() {
+  const completed = localStorage.getItem('hd_tour_v1_completed') === '1';
+  if (!completed) openTour();
+}
+
 function csvSafe(value) {
   const text = sanitizeText(value, '');
   const prefixed = /^[=+\-@]/.test(text) ? `'${text}` : text;
@@ -722,6 +1153,7 @@ function downloadLGA() {
   a.href = URL.createObjectURL(blob);
   a.download = `${sanitizeText(l.name, 'lga').replace(/\s+/g, '_')}_health_data.csv`;
   a.click();
+  queueEvent('export', { format: 'lga_csv' });
 }
 
 function toggleLayer(layerName) {
@@ -739,6 +1171,27 @@ function toggleLayer(layerName) {
   renderMap();
 }
 
+function applyHelpTooltips() {
+  document.querySelectorAll('.help-icon').forEach((icon) => {
+    const help = icon.getAttribute('data-help');
+    if (help) {
+      icon.setAttribute('title', help);
+      icon.setAttribute('aria-label', help);
+    }
+  });
+}
+
+function detectMobile() {
+  const next = window.matchMedia('(max-width: 768px)').matches;
+  if (next !== isMobile) {
+    isMobile = next;
+    document.body.classList.toggle('is-mobile', isMobile);
+    pushStateToPython({ immediate: true });
+  } else {
+    document.body.classList.toggle('is-mobile', isMobile);
+  }
+}
+
 function wireEvents() {
   const stateSelect = document.getElementById('state-select');
   stateOptions.forEach((st) => {
@@ -752,6 +1205,7 @@ function wireEvents() {
     currentState = e.target.value;
     syncHeader();
     pushStateToPython();
+    queueEvent('filter_change', { state: currentState });
   });
 
   const yearSelect = document.getElementById('year-select');
@@ -760,6 +1214,7 @@ function wireEvents() {
     currentYear = e.target.value;
     syncHeader();
     pushStateToPython();
+    queueEvent('filter_change', { year: currentYear });
   });
 
   const searchInput = document.getElementById('search-input');
@@ -779,16 +1234,98 @@ function wireEvents() {
 
   document.getElementById('compare-go-btn')?.addEventListener('click', runCompare);
   document.getElementById('compare-add-btn')?.addEventListener('click', addCompareSlot);
+
+  document.getElementById('map-table-toggle')?.addEventListener('click', toggleMapTable);
+  const mapToggle = document.getElementById('map-table-toggle');
+  if (mapToggle) mapToggle.setAttribute('aria-expanded', 'false');
+
+  document.getElementById('share-open-btn')?.addEventListener('click', () => {
+    updateShareDrawer();
+    openOverlay('share-drawer');
+    queueEvent('share', { method: 'open' });
+  });
+  document.getElementById('share-close-btn')?.addEventListener('click', () => closeOverlay('share-drawer'));
+  document.getElementById('copy-share-btn')?.addEventListener('click', async () => {
+    const url = buildShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (e) {
+      // ignore clipboard errors
+    }
+    queueEvent('share', { method: 'copy' });
+  });
+  document.getElementById('share-x')?.addEventListener('click', () => queueEvent('share', { method: 'x' }));
+  document.getElementById('share-linkedin')?.addEventListener('click', () => queueEvent('share', { method: 'linkedin' }));
+  document.getElementById('share-whatsapp')?.addEventListener('click', () => queueEvent('share', { method: 'whatsapp' }));
+
+  document.getElementById('export-open-btn')?.addEventListener('click', () => {
+    setExportMode(currentExportMode);
+    openOverlay('export-drawer');
+  });
+  document.getElementById('export-close-btn')?.addEventListener('click', () => closeOverlay('export-drawer'));
+  document.querySelectorAll('.export-chip').forEach((chip) => {
+    chip.addEventListener('click', () => setExportMode(chip.dataset.export || 'csv'));
+  });
+  document.getElementById('export-download-btn')?.addEventListener('click', downloadExport);
+
+  document.getElementById('tour-restart-btn')?.addEventListener('click', () => {
+    tourIndex = 0;
+    openTour();
+  });
+  document.getElementById('tour-skip-btn')?.addEventListener('click', () => closeTour(true));
+  document.getElementById('tour-next-btn')?.addEventListener('click', () => {
+    if (tourIndex >= tourSteps.length - 1) {
+      closeTour(true);
+      return;
+    }
+    tourIndex += 1;
+    renderTourStep();
+  });
+
+  applyHelpTooltips();
+
+  const methodLink = document.getElementById('methodology-link');
+  const glossaryLink = document.getElementById('glossary-link');
+  [methodLink, glossaryLink].forEach((link) => {
+    if (!link) return;
+
+    const rawHref = link.getAttribute('href') || '';
+    const parsed = new URL(rawHref, `${window.parent.location.origin}${window.parent.location.pathname}`);
+    const navUrl = new URL(parsed.href);
+    if (testingMode) {
+      navUrl.searchParams.set('testing', '1');
+      if (testPersona) navUrl.searchParams.set('persona', testPersona);
+      if (testSession) navUrl.searchParams.set('session', testSession);
+    }
+
+    const targetHref = navUrl.search ? `${navUrl.pathname}?${navUrl.searchParams.toString()}` : navUrl.pathname;
+    link.setAttribute('href', targetHref);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+  });
 }
 
 wireEvents();
+detectMobile();
+window.addEventListener('resize', detectMobile);
+if (testingMode && testSession) {
+  pushStateToPython({ immediate: true });
+}
 syncHeader();
 applyDepthVisibility();
 renderHotspots();
 renderCompareSlots();
 renderMap();
+maybeStartTour();
 
 if (selectedLGA) {
   openDrawer();
   renderDetail();
 }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  closeOverlay('share-drawer');
+  closeOverlay('export-drawer');
+  closeTour(false);
+});

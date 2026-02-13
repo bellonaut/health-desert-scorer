@@ -1,4 +1,4 @@
-"""Methodology page for model transparency and ethical framing."""
+﻿"""Methodology page for model transparency and ethical framing."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import streamlit as st
+
+from utils.analytics import log_event
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = ROOT / "models" / "risk_model_v1.2"
@@ -17,9 +19,10 @@ st.markdown(
     """
 The **Health Desert Risk Score** is a decision-support indicator for LGA-level healthcare access barriers.
 
-> ⚠️ This tool supports planning and prioritization. It is **not** for clinical diagnosis or individual prediction.
+This tool supports planning and prioritization. It is not for clinical diagnosis or individual prediction.
 """
 )
+st.markdown("Website: [www.bashir.bio](https://www.bashir.bio)")
 
 metrics = {"accuracy": 0.0, "f1": 0.0, "roc_auc": 0.0}
 metrics_path = MODEL_DIR / "metrics.json"
@@ -31,7 +34,7 @@ c1.metric("Model Accuracy", f"{metrics['accuracy']:.1%}")
 c2.metric("F1 Score", f"{metrics['f1']:.2f}")
 c3.metric("ROC-AUC", f"{metrics['roc_auc']:.2f}")
 
-st.subheader("⚠️ Limitations")
+st.subheader("Limitations")
 st.warning(
     """
 - Does not account for insecurity or conflict context
@@ -41,14 +44,29 @@ st.warning(
 """
 )
 
-st.subheader("📄 Model Card")
+st.subheader("Model Card")
 model_card = MODEL_DIR / "model_card.md"
 if model_card.exists():
     st.download_button(
-        "📥 Download Model Card",
+        "Download Model Card",
         model_card.read_text(encoding="utf-8"),
         file_name="health_desert_model_card.md",
         mime="text/markdown",
     )
 else:
     st.info("Model card is not available in this deployment.")
+
+# Testing instrumentation
+try:
+    params = st.query_params
+except Exception:  # pragma: no cover
+    params = st.experimental_get_query_params()
+
+if "testing" in params:
+    session_id = params.get("session")
+    persona = params.get("persona", "unknown")
+    if isinstance(session_id, list):
+        session_id = session_id[-1]
+    if isinstance(persona, list):
+        persona = persona[-1]
+    log_event(session_id=str(session_id) if session_id else None, persona=str(persona), event_type="methodology_open")

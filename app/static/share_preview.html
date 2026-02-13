@@ -1,0 +1,27 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Health Desert Scorer - Shared View</title>
+<meta property="og:title" content="Health Desert Scorer - Shared View">
+<meta property="og:description" content="Explore healthcare access barriers across Nigeria and compare LGAs.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="/static/og_preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const target = new URL('/', window.location.origin);
+  const keys = ['state', 'focus', 'depth', 'year', 'lga', 'compare', 'mobile'];
+  keys.forEach((k) => {
+    if (params.has(k)) {
+      target.searchParams.set(k, params.get(k));
+    }
+  });
+  window.location.replace(target.pathname + '?' + target.searchParams.toString());
+</script>
+</head>
+<body>
+  <p>Redirecting to shared view…</p>
+</body>
+</html>

@@ -10,10 +10,15 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <!-- APP_STYLE -->
 <!-- DATA_INJECTION -->
 </head>
 <body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<a class="skip-link" href="#filters">Skip to filters</a>
+<a class="skip-link" href="#results">Skip to results</a>
 
 <div class="app-shell">
 
@@ -24,27 +29,38 @@
   <div class="state-pill">
     <span class="pill-dot"></span>
     <span class="icon meta-icon">STATE</span>
-    <select id="state-select" class="state-select"></select>
+    <select id="state-select" class="state-select" aria-label="Select state"></select>
   </div>
 
   <div class="state-pill year-pill">
     <span class="pill-dot"></span>
     <span class="icon meta-icon">YEAR</span>
-    <select id="year-select" class="year-select">
+    <select id="year-select" class="year-select" aria-label="Select year">
       <option value="2013">2013</option>
       <option value="2018">2018</option>
       <option value="Both">Both</option>
     </select>
   </div>
 
-
   <div class="state-pill">
     <span class="pill-dot"></span>
-    <a href="?page=pages%2F1_%F0%9F%93%8A_Methodology.py" target="_parent" class="meta-link">📊 Methodology</a>
+    <a href="/Methodology" target="_blank" rel="noopener noreferrer" class="meta-link" id="methodology-link">📊 Methodology</a>
   </div>
   <div class="state-pill">
     <span class="pill-dot"></span>
-    <a href="?page=pages%2F2_%F0%9F%93%96_Glossary.py" target="_parent" class="meta-link">📖 Glossary</a>
+    <a href="/Glossary" target="_blank" rel="noopener noreferrer" class="meta-link" id="glossary-link">📖 Glossary</a>
+  </div>
+  <div class="state-pill">
+    <span class="pill-dot"></span>
+    <button type="button" class="meta-link-btn" id="share-open-btn">Share</button>
+  </div>
+  <div class="state-pill">
+    <span class="pill-dot"></span>
+    <button type="button" class="meta-link-btn" id="export-open-btn">Export</button>
+  </div>
+  <div class="state-pill">
+    <span class="pill-dot"></span>
+    <button type="button" class="meta-link-btn" id="tour-restart-btn">Tour</button>
   </div>
 
   <div id="dataset-meta" class="dataset-meta">
@@ -59,17 +75,17 @@
   </div>
 </header>
 
-<div class="res-note">↔ Rotate device for map view</div>
+<div class="res-note">Tip: use the map and pull up details for any LGA</div>
 
-<div class="main">
-  <div class="left-panel">
+<div class="main" id="main-content" role="main">
+  <div class="left-panel" id="filters" role="region" aria-label="Filters and results">
     <div class="panel-scroll" id="panel-scroll">
       <div class="question-bar">
         <span class="q-icon">⌕</span>
-        <input type="text" placeholder="Search LGA or ask a question…" id="search-input">
+        <input type="text" placeholder="Search for an LGA" id="search-input" aria-label="Search LGA">
       </div>
 
-      <div class="section-label">Focus</div>
+      <div class="section-label">Focus <span class="help-icon" data-help="Choose a barrier focus to rank LGAs on a specific access constraint.">?</span></div>
       <div class="filter-chips">
         <button type="button" class="chip active" data-focus="All risk" aria-pressed="true">All risk</button>
         <button type="button" class="chip" data-focus="Child mortality" aria-pressed="false">Child mortality</button>
@@ -78,7 +94,7 @@
         <button type="button" class="chip" data-focus="5km coverage" aria-pressed="false">5km coverage</button>
       </div>
 
-      <div class="section-label">Highest need · <span id="focus-scope">Nigeria</span></div>
+      <div class="section-label">Highest-need list · <span id="focus-scope">Nigeria</span> <span class="help-icon" data-help="Ranked by the selected focus. This highlights access barriers, not blame.">?</span></div>
       <div class="hotspot-list" id="hotspot-list"></div>
     </div>
 
@@ -95,13 +111,13 @@
     </div>
   </div>
 
-  <div class="map-area" id="map-area">
+  <div class="map-area" id="results" role="region" aria-label="Map and layers">
     <div id="map-leaflet" class="map-leaflet"></div>
 
     <div class="layer-strip">
       <button type="button" class="layer-btn active" data-layer="Risk score" aria-pressed="true">Risk score</button>
       <button type="button" class="layer-btn" data-layer="Facilities" aria-pressed="false">Facilities</button>
-      <button type="button" class="layer-btn" data-layer="Population" aria-pressed="false">Population</button>
+      <button type="button" class="layer-btn" data-layer="Connectivity" aria-pressed="false">Connectivity</button>
       <button type="button" class="layer-btn depth-gate depth-1" data-layer="Towers" aria-pressed="false">Towers</button>
       <button type="button" class="layer-btn depth-gate depth-2" data-layer="SHAP" aria-pressed="false">SHAP</button>
     </div>
@@ -115,10 +131,68 @@
       <div class="legend-row"><div class="legend-dot legend-dot-red"></div><span>Worse / higher risk</span></div>
     </div>
 
-    <div class="data-footnote">DHS 2013 · NHFR · OpenCellID · Model v2b6bc3e</div>
+    <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
+    <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
+    <div class="map-credit">made by bashir aminu bello 2016</div>
+
+    <div class="data-footnote" id="data-footnote">DHS 2013/2018 · NHFR · OpenCellID · Model v1.2</div>
   </div>
 </div>
 
+</div>
+
+<div class="drawer-overlay" id="share-drawer" aria-hidden="true">
+  <div class="drawer-panel" role="dialog" aria-label="Share this view">
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-title">Share this view</div>
+        <div class="drawer-subtitle">Copy the link or share via social apps.</div>
+      </div>
+      <button type="button" class="close-btn" id="share-close-btn" aria-label="Close share panel">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="share-url" id="share-url"></div>
+      <button type="button" class="dl-btn" id="copy-share-btn">Copy link</button>
+      <div class="share-links">
+        <a class="share-link" id="share-x" target="_blank" rel="noopener noreferrer">Share on X</a>
+        <a class="share-link" id="share-linkedin" target="_blank" rel="noopener noreferrer">Share on LinkedIn</a>
+        <a class="share-link" id="share-whatsapp" target="_blank" rel="noopener noreferrer">Share on WhatsApp</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer-overlay" id="export-drawer" aria-hidden="true">
+  <div class="drawer-panel" role="dialog" aria-label="Export data">
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-title">Export data</div>
+        <div class="drawer-subtitle">Download data for reports, GIS tools, or planning.</div>
+      </div>
+      <button type="button" class="close-btn" id="export-close-btn" aria-label="Close export panel">×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="export-options">
+        <button type="button" class="chip export-chip active" data-export="csv">CSV</button>
+        <button type="button" class="chip export-chip" data-export="geojson">GeoJSON</button>
+        <button type="button" class="chip export-chip" data-export="summary">Summary</button>
+        <button type="button" class="chip export-chip" data-export="bundle">Bundle</button>
+      </div>
+      <div class="export-help" id="export-help">CSV is compatible with Excel and Google Sheets.</div>
+      <button type="button" class="dl-btn" id="export-download-btn">Download</button>
+    </div>
+  </div>
+</div>
+
+<div class="tour-overlay" id="tour-overlay" aria-hidden="true">
+  <div class="tour-card" role="dialog" aria-label="Onboarding tour">
+    <div class="tour-step" id="tour-step-title">Welcome</div>
+    <div class="tour-body" id="tour-step-body"></div>
+    <div class="tour-actions">
+      <button type="button" class="chip" id="tour-skip-btn">Skip tour</button>
+      <button type="button" class="dl-btn" id="tour-next-btn">Next</button>
+    </div>
+  </div>
 </div>
 
 <!-- APP_SCRIPT -->

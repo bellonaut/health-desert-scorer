@@ -1,7 +1,8 @@
-"""Data loading and JSON-friendly helpers for the embedded Health Desert app."""
+﻿"""Data loading and JSON-friendly helpers for the embedded Health Desert app."""
 
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -13,9 +14,14 @@ import pandas as pd
 
 # Paths relative to repository root
 ROOT_DIR = Path(__file__).resolve().parent.parent
+BRONZE_DIR = ROOT_DIR / "data" / "bronze"
 RAW_DIR = ROOT_DIR / "data" / "raw"
 PROCESSED_DIR = ROOT_DIR / "data" / "processed"
+SILVER_DIR = ROOT_DIR / "data" / "silver"
 GOLD_DIR = ROOT_DIR / "data" / "gold"
+
+logging.basicConfig(level=logging.INFO)
+LOGGER = logging.getLogger(__name__)
 
 # Frontend focus labels -> dataframe columns
 FOCUS_COLUMN = {
@@ -34,6 +40,10 @@ RISK_TEMPERATURE = float(os.getenv("RISK_TEMPERATURE", "2.0"))
 # Columns we expect to exist to avoid KeyErrors downstream
 EXPECTED_COLUMNS = [
     "risk_score",
+    "risk_score_total",
+    "risk_score_facility_access",
+    "risk_score_connectivity",
+    "risk_score_mortality",
     "facilities_per_10k",
     "avg_distance_km",
     "u5mr_mean",
@@ -45,11 +55,32 @@ EXPECTED_COLUMNS = [
     "year",
     "confidence_pct",
     "confidence_reason_codes",
-    "risk_score_total",
+    "model_version",
+    "estimate_as_of",
+    "primary_barriers",
+    "recommendation",
 ]
 
 
-def _load_gold_predictions() -> pd.DataFrame:
+def _slug(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.strip().str.lower().str.replace(r"\s+", "_", regex=True)
+
+
+def _make_lga_id(lga_name: pd.Series, state_name: pd.Series | None = None) -> pd.Series:
+    lga_slug = _slug(lga_name)
+    if state_name is None:
+        return lga_slug
+    state_slug = _slug(state_name)
+    state_slug = state_slug.where(state_name.notna() & state_name.astype(str).str.strip().ne(""), "")
+    return (state_slug + "__" + lga_slug).where(state_slug.ne(""), lga_slug)
+
+
+def _prefer_non_null(primary: pd.Series, fallback: pd.Series) -> pd.Series:
+    """Fill nulls in primary from fallback without relying on combine_first internals."""
+    return primary.where(primary.notna(), fallback)
+
+
+def _load_gold_risk() -> pd.DataFrame:
     gold_path = GOLD_DIR / "gold_lga_risk.csv"
     if not gold_path.exists():
         return pd.DataFrame()
@@ -59,21 +90,46 @@ def _load_gold_predictions() -> pd.DataFrame:
     return gold
 
 
-def _load_boundaries() -> gpd.GeoDataFrame:
-    path = RAW_DIR / "lga_boundaries.geojson"
-    boundaries = gpd.read_file(path)
-    rename_map = {
-        "lganame": "lga_name",
-        "statename": "state_name",
-        "uniq_id": "lga_uid",
+def _load_gold_explain() -> pd.DataFrame:
+    path = GOLD_DIR / "gold_lga_explain.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+def load_boundaries(resolution: str = "auto", is_mobile: bool | None = None, zoom: float | None = None) -> gpd.GeoDataFrame:
+    """Load boundaries at the requested resolution with fallback to raw."""
+    chosen = resolution
+    if resolution == "auto":
+        if is_mobile:
+            chosen = "low"
+        elif zoom is not None and zoom < 8:
+            chosen = "medium"
+        else:
+            chosen = "high"
+
+    file_map = {
+        "low": SILVER_DIR / "lga_boundaries_lo.geojson",
+        "medium": SILVER_DIR / "lga_boundaries_med.geojson",
+        "high": SILVER_DIR / "lga_boundaries_hi.geojson",
     }
-    boundaries = boundaries.rename(columns={k: v for k, v in rename_map.items() if k in boundaries.columns})
-    boundaries["lga_name"] = boundaries["lga_name"].astype(str).str.strip()
-    boundaries["state_name"] = boundaries["state_name"].astype(str).str.strip()
-    if "lga_uid" not in boundaries.columns:
-        boundaries["lga_uid"] = boundaries["lga_name"].astype("category").cat.codes
-    boundaries["lga_uid"] = boundaries["lga_uid"].astype(str)
-    return boundaries
+    path = file_map.get(chosen)
+    if path is not None and path.exists():
+        gdf = gpd.read_file(path)
+    else:
+        gdf = gpd.read_file(RAW_DIR / "lga_boundaries.geojson")
+        chosen = "raw"
+
+    gdf = gdf.rename(columns={"lganame": "lga_name", "statename": "state_name", "uniq_id": "lga_uid"})
+    gdf["lga_name"] = gdf["lga_name"].astype(str).str.strip()
+    gdf["state_name"] = gdf["state_name"].astype(str).str.strip()
+    if "lga_uid" not in gdf.columns:
+        gdf["lga_uid"] = gdf["lga_name"].astype("category").cat.codes
+    gdf["lga_uid"] = gdf["lga_uid"].astype(str)
+    gdf["lga_id"] = _make_lga_id(gdf["lga_name"], gdf["state_name"])
+    gdf["state_id"] = _slug(gdf["state_name"])
+    gdf.attrs["boundary_resolution"] = chosen
+    return gdf
 
 
 def _load_features() -> pd.DataFrame:
@@ -85,6 +141,8 @@ def _load_features() -> pd.DataFrame:
             / pd.to_numeric(features["population"], errors="coerce")
             * 10000
         )
+    features["lga_id"] = _make_lga_id(features["lga_name"], features["state_name"])
+    features["state_id"] = _slug(features["state_name"])
     return features
 
 
@@ -92,7 +150,12 @@ def _load_predictions() -> pd.DataFrame:
     preds_path = PROCESSED_DIR / "lga_predictions.csv"
     if not preds_path.exists():
         return pd.DataFrame()
-    return pd.read_csv(preds_path)
+    preds = pd.read_csv(preds_path)
+    if "risk_score" not in preds.columns and "risk_prob" in preds.columns:
+        preds = preds.rename(columns={"risk_prob": "risk_score"})
+    if {"lga_name", "year", "risk_score"} <= set(preds.columns):
+        preds = preds.groupby(["lga_name", "year"], as_index=False)["risk_score"].mean()
+    return preds
 
 
 def _temperature_scale(probs: pd.Series, temperature: float = 1.0) -> pd.Series:
@@ -117,49 +180,107 @@ def _load_shap() -> pd.DataFrame | None:
     return pd.read_csv(shap_path)
 
 
-@lru_cache(maxsize=1)
-def load_backend_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame | None]:
+def _data_last_updated(gold_df: pd.DataFrame) -> str | None:
+    if gold_df.empty or "estimate_as_of" not in gold_df.columns:
+        return None
+    return str(pd.to_datetime(gold_df["estimate_as_of"], errors="coerce").max().date())
+
+
+@lru_cache(maxsize=4)
+def load_backend_data(
+    source_mode: str = "gold_first",
+    boundary_resolution: str = "auto",
+    is_mobile: bool | None = None,
+    zoom: float | None = None,
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame | None]:
     """Load all source data once per process."""
-    boundaries = _load_boundaries()
+    boundaries = load_boundaries(resolution=boundary_resolution, is_mobile=is_mobile, zoom=zoom)
     features = _load_features()
     preds = _load_predictions()
-    gold_preds = _load_gold_predictions()
+    gold_risk = _load_gold_risk()
+    gold_explain = _load_gold_explain()
     shap_df = _load_shap()
 
     merged_features = features.merge(preds, on=["lga_name", "year"], how="left")
-    if not gold_preds.empty:
+    data_source_mode = "processed_fallback"
+
+    if source_mode != "processed_only" and not gold_risk.empty:
+        gold_risk = gold_risk.copy()
+        if "lga_id" not in gold_risk.columns and "lga_name" in gold_risk.columns:
+            gold_risk["lga_id"] = _make_lga_id(gold_risk["lga_name"], gold_risk.get("state_name"))
         gold_cols = [
             c
             for c in [
-                "lga_name",
+                "lga_id",
                 "year",
                 "risk_score",
                 "risk_score_total",
+                "risk_score_facility_access",
+                "risk_score_connectivity",
+                "risk_score_mortality",
                 "confidence_pct",
                 "confidence_reason_codes",
                 "model_version",
                 "estimate_as_of",
+                "primary_barriers",
+                "recommendation",
             ]
-            if c in gold_preds.columns
+            if c in gold_risk.columns
         ]
         merged_features = merged_features.drop(columns=[c for c in ["risk_score", "risk_prob"] if c in merged_features.columns])
-        merged_features = merged_features.merge(gold_preds[gold_cols], on=["lga_name", "year"], how="left")
+        merged_features = merged_features.merge(gold_risk[gold_cols], on=["lga_id", "year"], how="left")
+        data_source_mode = "gold_first"
+
+        if not gold_explain.empty:
+            explain_cols = [c for c in ["lga_id", "year", "primary_barriers", "recommendation"] if c in gold_explain.columns]
+            if explain_cols:
+                merged_features = merged_features.drop(columns=[c for c in ["primary_barriers", "recommendation"] if c in merged_features.columns])
+                merged_features = merged_features.merge(gold_explain[explain_cols], on=["lga_id", "year"], how="left")
+    else:
+        LOGGER.warning("Gold tables not found. Falling back to processed predictions for one release.")
+
     if "risk_score" not in merged_features.columns:
         merged_features["risk_score"] = pd.to_numeric(merged_features.get("risk_prob"), errors="coerce")
     merged_features["risk_score"] = pd.to_numeric(merged_features["risk_score"], errors="coerce").clip(0, 1)
     if RISK_TEMPERATURE and RISK_TEMPERATURE != 1.0:
         merged_features["risk_score"] = _temperature_scale(merged_features["risk_score"], RISK_TEMPERATURE)
 
-    merged = boundaries.merge(merged_features, on="lga_name", how="left")
+    merged = boundaries.merge(merged_features, on=["lga_id"], how="left")
     if "lga_uid_x" in merged.columns or "lga_uid_y" in merged.columns:
-        merged["lga_uid"] = merged.get("lga_uid_y").combine_first(merged.get("lga_uid_x"))
+        left = merged["lga_uid_y"] if "lga_uid_y" in merged.columns else None
+        right = merged["lga_uid_x"] if "lga_uid_x" in merged.columns else None
+        if left is None:
+            merged["lga_uid"] = right
+        elif right is None:
+            merged["lga_uid"] = left
+        else:
+            merged["lga_uid"] = _prefer_non_null(left, right)
         merged = merged.drop(columns=[col for col in ["lga_uid_x", "lga_uid_y"] if col in merged.columns])
     if "lga_uid" not in merged.columns:
         merged["lga_uid"] = merged["lga_name"].astype("category").cat.codes
 
+    # Resolve potential duplicate LGA columns after merge
+    if "lga_name_x" in merged.columns or "lga_name_y" in merged.columns:
+        left = merged["lga_name_y"] if "lga_name_y" in merged.columns else None
+        right = merged["lga_name_x"] if "lga_name_x" in merged.columns else None
+        if left is None:
+            merged["lga_name"] = right
+        elif right is None:
+            merged["lga_name"] = left
+        else:
+            merged["lga_name"] = _prefer_non_null(left, right)
+        merged = merged.drop(columns=[col for col in ["lga_name_x", "lga_name_y"] if col in merged.columns])
+
     # Resolve potential duplicate state columns after merge
     if "state_name_x" in merged.columns or "state_name_y" in merged.columns:
-        merged["state_name"] = merged.get("state_name_y").combine_first(merged.get("state_name_x"))
+        left = merged["state_name_y"] if "state_name_y" in merged.columns else None
+        right = merged["state_name_x"] if "state_name_x" in merged.columns else None
+        if left is None:
+            merged["state_name"] = right
+        elif right is None:
+            merged["state_name"] = left
+        else:
+            merged["state_name"] = _prefer_non_null(left, right)
         merged = merged.drop(columns=[col for col in ["state_name_x", "state_name_y"] if col in merged.columns])
 
     if shap_df is not None:
@@ -186,7 +307,15 @@ def load_backend_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame | None]:
     merged["state_name"] = merged["state_name"].astype(str).str.strip()
     merged["lga_name"] = merged["lga_name"].astype(str).str.strip()
 
-    return gpd.GeoDataFrame(merged), shap_df
+    merged = gpd.GeoDataFrame(merged)
+    merged.attrs["boundary_resolution"] = boundaries.attrs.get("boundary_resolution", "raw")
+    merged.attrs["data_source_mode"] = data_source_mode
+    merged.attrs["data_last_updated"] = _data_last_updated(gold_risk)
+    merged.attrs["model_version"] = (
+        gold_risk["model_version"].dropna().unique().tolist() if not gold_risk.empty and "model_version" in gold_risk.columns else []
+    )
+
+    return merged, shap_df
 
 
 def latest_year(df: pd.DataFrame) -> int | None:
@@ -294,6 +423,7 @@ def get_ranked_hotspots(
                 "name": row.get("lga_name"),
                 "state": row.get("state_name"),
                 "risk": _safe_float(row.get("risk_score")),
+                "risk_total": _safe_float(row.get("risk_score_total")),
                 "fac": _safe_float(row.get("facilities_per_10k")),
                 "dist": _safe_float(row.get("avg_distance_km")),
                 "u5mr": _safe_float(row.get("u5mr_mean")),
@@ -303,6 +433,8 @@ def get_ranked_hotspots(
                 "year": row.get("year"),
                 "confidence_pct": _safe_float(row.get("confidence_pct")),
                 "confidence_reason_codes": row.get("confidence_reason_codes"),
+                "primary_barriers": row.get("primary_barriers"),
+                "recommendation": row.get("recommendation"),
             }
         )
     return hotspots
@@ -325,6 +457,7 @@ def get_lga_detail(
         "name": row.get("lga_name"),
         "state": row.get("state_name"),
         "risk": _safe_float(row.get("risk_score")),
+        "risk_total": _safe_float(row.get("risk_score_total")),
         "fac": _safe_float(row.get("facilities_per_10k")),
         "dist": _safe_float(row.get("avg_distance_km")),
         "u5mr": _safe_float(row.get("u5mr_mean")),
@@ -335,6 +468,8 @@ def get_lga_detail(
         "year": row.get("year"),
         "confidence_pct": _safe_float(row.get("confidence_pct")),
         "confidence_reason_codes": row.get("confidence_reason_codes"),
+        "primary_barriers": row.get("primary_barriers"),
+        "recommendation": row.get("recommendation"),
         "shap": shap_values,
     }
 

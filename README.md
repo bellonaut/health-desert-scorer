@@ -30,7 +30,7 @@ This project helps surface where access constraints may be strongest, so decisio
    - search an LGA,
    - switch focus (all risk, child mortality, facility access, connectivity, 5km coverage),
    - view highest-need LGAs.
-5. Use map tabs (**Risk score**, **Facilities**, **Population**) to explore different views.
+5. Use map tabs (**Risk score**, **Facilities**, **Connectivity**) to explore different views.
 
 ---
 
@@ -38,7 +38,7 @@ This project helps surface where access constraints may be strongest, so decisio
 - **Health desert (in this project):** an area where people are more likely to face practical barriers to care (distance, fewer facilities, weaker connectivity, and related risk signals).
 - **Risk score:** a **relative planning score** (not a diagnosis) showing which LGAs may need attention sooner compared with others.
 - **Facilities layer:** map view showing healthcare facility presence/distribution.
-- **Population layer:** map view showing population pressure/distribution context.
+- **Connectivity layer:** map view showing mobile-network connectivity context (towers per 10k).
 - **Facility access (focus):** view emphasizing likely constraints in reaching nearby care.
 - **Connectivity (focus):** view emphasizing weak signal/network proxy areas that can affect care coordination.
 - **5km coverage (focus):** view related to how much population/facility access is likely within a 5km distance band.
@@ -90,7 +90,7 @@ Shows filtering by **Facility access** and searching within a state context.
 ---
 
 ## Responsible use
-- This is a **prototype for planning**, not a clinical triage tool.
+- This is a **planning tool**, not a clinical triage system.
 - Always combine with field realities: security, roads, seasonality, staffing quality, and local validation.
 - Treat outputs as a **starting point**, not final truth.
 
@@ -109,6 +109,8 @@ pip install -r requirements.txt
 python scripts/create_mock_dhs.py
 python scripts/download_open_data.py
 python -m src.data.build_features
+make build-data
+make validate-gold
 streamlit run app/app.py
 ```
 
@@ -117,7 +119,8 @@ streamlit run app/app.py
 ## Data, ethics, and limits
 - Repo stores aggregated outputs only.
 - Do **not** commit restricted DHS microdata or sensitive coordinates.
-- `data/raw/` stays gitignored (aside from tiny demo boundaries); keep DHS downloads local under the DHS data-use agreement.
+- `data/bronze/` holds immutable source snapshots, with sensitive raw data kept local per DHS data-use agreements.
+- `data/silver/` and `data/gold/` contain validated, app-ready aggregates for reproducible demos.
 - Results are exploratory and should be validated before policy commitments.
 
 ---
