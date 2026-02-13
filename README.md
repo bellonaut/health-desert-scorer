@@ -3,6 +3,7 @@
 A web-based planning tool to identify Local Government Areas (LGAs) with higher barriers to healthcare access.
 
 **Live app:** https://bashir-healthdesert.streamlit.app/  
+**Live demo video** https://app.screencastify.com/watch/PTXPjfBZTNk3cO2yPyh5
 **Website:** https://www.bashir.bio
 
 ---
