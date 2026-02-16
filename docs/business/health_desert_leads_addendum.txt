@@ -1,0 +1,177 @@
+IAN GOVERNMENT & POLICY
+Federal Level
+National Digital Health Initiative (NDHI)
+Email: info@digitalhealth.gov.ng
+Contact: Director General
+Pitch: Pilot in 2 states for health facility planning
+National Primary Health Care Development Agency (NPHCDA)
+Email: info@nphcda.gov.ng
+Pitch: Integrate into microplanning workflows
+Nigeria Centre for Disease Control (NCDC)
+Contact via: https://ncdc.gov.ng/contact
+Pitch: Outbreak preparedness + facility mapping
+State Level (Priority States)
+Kano State Ministry of Health
+Why: Large population, GeoST4R pilot already active
+Pitch: Complement existing geospatial work
+Lagos State Ministry of Health
+Why: Urban challenges, high visibility
+Pitch: Urban health access planning
+TIER 2: NIGERIAN RESEARCHERS & ACADEMICS
+University of Ibadan (Top Priority)
+Dr. David A. Adewole
+Affiliation: Dept of Health Policy & Management, U of Ibadan
+Expertise: Geospatial health, NHIS access
+Email: Find via University of Ibadan faculty directory
+Pitch: Validation study collaboration
+Dr. Clement A. Adebamowo
+Affiliation: Center for Bioethics and Research, Ibadan
+Expertise: Health data science in Africa
+Pitch: BridgELSI alignment, data ethics collaboration
+Dr. Iruka N. Okeke
+Affiliation: Dept of Pharmaceutical Microbiology, U of Ibadan
+Expertise: Health systems research
+Pitch: Methodology review
+Dr. Ayodele Jegede
+Affiliation: Dept of Sociology + Bioethics, U of Ibadan
+Expertise: Health systems, ethics
+Pitch: Ethical framing consultation
+Other Nigerian Universities
+Dr. Aishatu Lawal Adamu
+Affiliation: Bayero University / Kano Teaching Hospital
+Expertise: Community medicine, epidemiology
+Pitch: Kano State pilot partnership
+Prof. Temidayo Ogundiran
+Affiliation: Dept of Surgery, U of Ibadan
+Expertise: Health research capacity
+Pitch: Research collaboration
+Nigerian Research Institutes
+Nigeria Institute for Medical Research (NIMR)
+Contact: director@nimr.gov.ng
+Pitch: Research partnership
+TIER 3: GEOSPATIAL HEALTH RESEARCHERS
+Dr. Oluwagbenga Lawal
+Affiliation: University of Port Harcourt
+Expertise: Geospatial PHC facility mapping
+Paper: "Modelling geographic accessibility to PHCFs in Nigeria"
+Pitch: Methodology comparison, co-authorship
+Dr. Felix E. Anyiam
+Affiliation: Centre for Health and Development, U of Port Harcourt
+Expertise: GIS, geospatial health analysis
+Pitch: Joint publication opportunity
+Prof. Martin Gorsky & Dr. John Manton
+Affiliation: LSHTM Centre for History in Public Health
+Expertise: Health systems history, Nigeria focus
+Email: Find via LSHTM directory
+Pitch: Historical context + modern tool integration
+TIER 4: INTERNATIONAL NGOs (Nigeria Operations)
+eHealth Africa
+Adam Thompson - Co-founder
+Organization: eHealth Africa
+Email: info@ehealthafrica.org
+Pitch: PlanFeld integration, field logistics complement
+eHealth Africa - General Inquiry
+Focus: Data-driven digital health solutions in Nigeria
+Pitch: Collaboration on geospatial health tools
+Clinton Health Access Initiative (CHAI)
+Dr. Olufunke Fasawe
+Title: VP Integration; Country Director - Nigeria
+Organization: CHAI Nigeria
+Pitch: DHIS2 integration, digital health tools
+Lakshmi Balachandran
+Title: Senior Director of Digital Health, CHAI
+Pitch: Digital public goods alignment
+CHAI Nigeria - Digital Health Team
+General email: via https://www.clintonhealthaccess.org/nigeria/
+Pitch: Complement DHIS2 with LGA-level access mapping
+TIER 5: GLOBAL THINK TANKS & RESEARCH INSTITUTIONS
+Center for Global Development (CGD)
+Amanda Glassman - EVP
+Organization: CGD
+Twitter: @glassmanamanda
+Focus: Global health policy, financing
+Pitch: Policy brief collaboration
+CGD Global Health Team
+Contact: https://www.cgdev.org/topics/global-health
+Pitch: Featured case study
+Brookings Africa Growth Initiative (AGI)
+AGI Health Policy Team
+Contact: https://www.brookings.edu/projects/africa-growth-initiative/
+Pitch: Foresight Africa contribution
+Chatham House - Africa Programme
+Tighisti Amare - Director, Africa Programme
+Organization: Chatham House
+Pitch: Policy roundtable on health equity tools
+Chatham House - Global Health Programme
+Pitch: Digital public goods for health security
+African Population and Health Research Center (APHRC)
+Dr. Catherine Kyobutungi - Executive Director
+Organization: APHRC, Nairobi
+Email: via https://aphrc.org/contact/
+Pitch: East-West Africa comparison study
+TIER 6: DIGITAL PUBLIC GOODS & TECH INITIATIVES
+Digital Public Goods Alliance (DPGA)
+Liv Marte Nordhaug - Co-lead, DPGA
+Organization: DPGA / UNDP
+Pitch: DPG Registry application support
+DPGA Submissions Team
+Email: digitalpublicgoods@undp.org
+Pitch: Submit for DPG recognition
+DHIS2 Program (University of Oslo)
+DHIS2 Core Team
+Contact: https://dhis2.org/contact/
+Pitch: Complementary tool for LGA-level planning
+GeoPrism Registry Team (CHAI-supported)
+Pitch: Integration discussion
+TIER 7: FUNDERS
+Gates Foundation - Digital Public Infrastructure
+Dan Radcliffe - Policy/Advocacy, DPI Team
+Organization: Bill & Melinda Gates Foundation
+Pitch: DPI for health access mapping
+Gates Foundation - Nigeria Country Office
+Pitch: Pilot funding for 2-state rollout
+Wellcome Trust
+Wellcome Digital Health Team
+Focus: DHIS2, climate + health data
+Contact: https://wellcome.org/what-we-do/our-work/digital-health
+Pitch: Climate + health access integration
+Grace Annan-Callcott & Simon Hall (Wellcome)
+Contacts mentioned in DHIS2 funding announcement
+Pitch: Complementary tool for climate-health nexus
+Global Fund
+Global Fund - Data Systems Team
+Pitch: Health systems strengthening tool
+TIER 8: ACADEMIC JOURNALS & MEDIA
+Journals
+The Lancet Global Health - Editors
+Pitch: Short report on tool + validation study
+BMJ Global Health - Digital health editor
+Pitch: Practice article on open-source health tools
+PLOS One - Open access
+Pitch: Methods paper
+Media
+The Conversation Africa
+Contact: africa@theconversation.com
+Pitch: Op-ed on digital tools for health equity
+Devex - Global development news
+Pitch: Feature on Nigerian innovation
+TIER 9: GLOBAL HEALTH CONFERENCES
+American Public Health Association (APHA) Annual Meeting
+Submit: Abstract on geospatial health equity tools
+International Conference on Public Health in Africa (CPHIA)
+Submit: Presentation on Health Desert Scorer
+Health Systems Research Symposium
+Biennial event
+Submit: Innovation showcase
+
+TIER 10: PRIVATE RISK INTELLIGENCE DATA PARTNERS (NEW LEAD SOURCE)
+NigeriaRiskIndex.com (High Priority)
+Organization: Risk Control Nigeria
+Website: https://nigeriariskindex.com/risk-map
+Email: info@riskcontrolnigeria.com
+Phone: +234 901 178 2353
+Location: Lagos, Nigeria
+What they do: Business risk intelligence, incident database, security consulting, and due diligence for Nigeria operations.
+Why fit: Strong operational-risk context and incident data can complement health-desert targeting for field team safety and logistics planning.
+Pitch: Joint pilot combining Health Desert Scorer prioritization with NigeriaRiskIndex risk layers to produce safer and more executable outreach plans at LGA level.
+First ask: 30-minute partnership call to scope one state-level proof of value and define a data-sharing workflow.

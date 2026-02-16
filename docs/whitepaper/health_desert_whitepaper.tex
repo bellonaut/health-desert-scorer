@@ -1,0 +1,229 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{setspace}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue,
+  pdftitle={Health Desert Scorer Nigeria Whitepaper},
+  pdfauthor={Bashir},
+  pdfsubject={LGA-level healthcare access decision support},
+  pdfkeywords={Nigeria, health access, LGA, geospatial, machine learning}
+}
+
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\onehalfspacing
+
+\title{Health Desert Scorer (Nigeria)\\
+\large A Decision-Support System for LGA-Level Healthcare Access Barriers}
+\author{Bashir \\ \texttt{www.bashir.bio}}
+\date{Draft v0.1 - \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The Health Desert Scorer is a Nigeria-focused decision-support application that identifies Local Government Areas (LGAs) with higher relative barriers to healthcare access. The system combines survey outcomes, facility distribution, distance proxies, and network connectivity signals to generate a comparative planning score. The tool is designed for prioritization and program planning by NGOs, clinics, policymakers, and research teams. It is explicitly not a diagnostic system and should not be used for individual-level prediction.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Executive Summary}
+Healthcare access constraints are often driven by distance, facility scarcity, and weak connectivity, not only by clinical factors. This project provides an LGA-level prioritization layer for Nigeria so partners can:
+\begin{itemize}[leftmargin=1.5em]
+  \item identify highest-need LGAs with transparent criteria,
+  \item compare risk dimensions (all-risk, child mortality, facility access, connectivity, 5km coverage),
+  \item export planning-friendly artifacts for field operations and policy discussions.
+\end{itemize}
+
+The current model card reports:
+\begin{itemize}[leftmargin=1.5em]
+  \item Accuracy: 0.82
+  \item Precision: 0.79
+  \item Recall: 0.84
+  \item F1: 0.81
+  \item ROC-AUC: 0.88
+\end{itemize}
+
+\section{Problem Statement}
+Many allocation decisions in public health are made with limited spatial synthesis across outcomes, services, and infrastructure. Existing dashboards can be difficult for non-technical users to operationalize into concrete outreach or deployment steps.
+
+The Health Desert Scorer addresses this gap with a lightweight and shareable interface that ranks LGAs by relative access barriers and supports rapid planning conversations.
+
+\section{System Overview}
+\subsection{Product Scope}
+The system is a map-first web application with:
+\begin{itemize}[leftmargin=1.5em]
+  \item state and year filtering,
+  \item LGA search and comparison workflow,
+  \item multiple focus modes for barrier-specific prioritization,
+  \item downloadable outputs for meetings and offline review.
+\end{itemize}
+
+\subsection{Intended Users}
+\begin{itemize}[leftmargin=1.5em]
+  \item NGOs and implementation partners: intervention targeting and campaign planning.
+  \item Primary care and clinic operators: outreach and catchment prioritization.
+  \item Government stakeholders: transparent resource prioritization discussions.
+  \item Researchers: hypothesis generation and sensitivity analysis support.
+\end{itemize}
+
+\subsection{Out of Scope}
+\begin{itemize}[leftmargin=1.5em]
+  \item Clinical diagnosis
+  \item Individual-level risk prediction
+  \item Use as sole basis for high-stakes funding decisions
+\end{itemize}
+
+\section{Data Inputs and Governance}
+\subsection{Primary Data Inputs}
+\begin{longtable}{p{3.0cm}p{2.8cm}p{2.0cm}p{6.0cm}}
+\toprule
+\textbf{Source} & \textbf{Dataset} & \textbf{Year(s)} & \textbf{Role in System} \\
+\midrule
+DHS & Survey outcomes & 2013, 2018 & Outcome and risk proxy signals at aggregated level \\
+NHFR & Facility registry & 2020 & Facility density and access proxy features \\
+WorldPop & Population estimates & 2020 & Population-normalized metrics (e.g., facilities per 10k) \\
+OpenCellID & Connectivity proxy & 2019 & Tower density and mobile connectivity context \\
+\bottomrule
+\end{longtable}
+
+\subsection{Data Protection and Ethics}
+The repository stores aggregated outputs only. Restricted microdata and sensitive coordinates are not committed. This design supports safer sharing and reproducibility for collaborative planning.
+
+\section{Methodology}
+\subsection{Feature Engineering}
+The current model family relies on core LGA-level features, including:
+\begin{itemize}[leftmargin=1.5em]
+  \item under-5 mortality proxy,
+  \item facilities per 10k population,
+  \item average distance to facilities,
+  \item towers per 10k population,
+  \item 5km coverage proxy,
+  \item additional normalized contextual terms.
+\end{itemize}
+
+\subsection{Modeling}
+The production model card describes a gradient boosted tree model (versioned artifact \texttt{risk\_model\_v1.2}) with 5-fold cross-validation stratified by state.
+
+\subsection{Evaluation Metrics}
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Accuracy & 0.82 \\
+Precision & 0.79 \\
+Recall & 0.84 \\
+F1 Score & 0.81 \\
+ROC-AUC & 0.88 \\
+\bottomrule
+\end{tabular}
+\caption{Current performance snapshot from \texttt{models/risk\_model\_v1.2/metrics.json}.}
+\end{table}
+
+\subsection{Interpretability}
+The application supports feature-attribution views for selected LGAs using SHAP-like local explanation payloads where available. Interpretability is included to improve trust in planning conversations, not to imply causal inference.
+
+\section{User Workflows}
+\subsection{NGO Workflow}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Filter to state and year.
+  \item Rank LGAs by selected focus (e.g., facility access).
+  \item Export top-priority list and map snapshot.
+  \item Validate with field and partner constraints.
+\end{enumerate}
+
+\subsection{Clinic and Frontline Workflow}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Select service area state.
+  \item Compare 2--4 LGAs for outreach sequencing.
+  \item Use barrier-specific recommendations as planning prompts.
+\end{enumerate}
+
+\subsection{Research Workflow}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Export model and feature outputs.
+  \item Reproduce scores and inspect feature importances.
+  \item Run sensitivity checks by year, source coverage, and thresholds.
+\end{enumerate}
+
+\section{Limitations}
+Known limitations include:
+\begin{itemize}[leftmargin=1.5em]
+  \item no direct encoding of conflict and insecurity constraints,
+  \item no seasonal road accessibility model in current release,
+  \item care quality and staffing adequacy are not directly modeled,
+  \item source completeness can vary across states and years.
+\end{itemize}
+
+\section{Deployment and Operations}
+\subsection{Current Deployment}
+The live system is delivered as a Streamlit-hosted app with an embedded custom HTML/JavaScript frontend.
+
+\subsection{Operational Readiness Checklist}
+\begin{itemize}[leftmargin=1.5em]
+  \item versioned model artifact and model card published,
+  \item data freshness metadata visible in UI/export artifacts,
+  \item per-LGA quality flags surfaced to end-users,
+  \item pilot governance process for partner sign-off and review.
+\end{itemize}
+
+\section{Pilot Design for External Partners}
+\subsection{Proposed Pilot Structure (90 Days)}
+\begin{itemize}[leftmargin=1.5em]
+  \item Week 1--2: stakeholder alignment and success metric definition.
+  \item Week 3--6: deployment, onboarding, and scenario testing.
+  \item Week 7--10: live planning use during at least one campaign cycle.
+  \item Week 11--12: evaluation, refinement, and scale decision memo.
+\end{itemize}
+
+\subsection{Pilot Success Metrics}
+\begin{itemize}[leftmargin=1.5em]
+  \item reduction in planning cycle time,
+  \item percentage of outreach plans supported by explicit spatial evidence,
+  \item adoption rate among intended user roles,
+  \item qualitative trust and usability scores.
+\end{itemize}
+
+\section{Commercialization Snapshot}
+The recommended commercialization pathway is service-led software:
+\begin{itemize}[leftmargin=1.5em]
+  \item paid pilot implementations,
+  \item annual subscriptions for hosted access and updates,
+  \item paid custom analytics packages for donor and research workflows.
+\end{itemize}
+
+\section{Conclusion}
+The Health Desert Scorer is best positioned as a practical planning layer between raw health data systems and field-level decision-making. Its value is in speed, usability, and transparent prioritization. With structured pilots, role-based onboarding, and documented governance, the project can evolve into a durable product for NGOs, clinic networks, and research partners.
+
+\appendix
+\section{Artifacts to Include Before Public Submission}
+\begin{itemize}[leftmargin=1.5em]
+  \item Full model card and changelog
+  \item Data dictionary and source refresh dates
+  \item Validation protocol and pilot report template
+  \item Responsible use policy and escalation flow
+\end{itemize}
+
+\section{Build Instructions}
+From repository root:
+\begin{verbatim}
+latexmk -pdf -output-directory=docs/whitepaper docs/whitepaper/health_desert_whitepaper.tex
+\end{verbatim}
+
+\end{document}
