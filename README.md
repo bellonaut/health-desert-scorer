@@ -32,6 +32,7 @@ Healthcare outcomes are strongly influenced by access barriers, including distan
    - Connectivity
    - 5km coverage
 5. Review map layers (**Risk score**, **Facilities**, **Connectivity**) and the highest-need list.
+6. Switch to **Detail** or **Research** view to access additional features like Compare LGAs.
 
 ---
 
