@@ -3,6 +3,8 @@ const injected = window.__INITIAL_DATA__ || {};
 const meta = injected.meta || {};
 const lgas = Array.isArray(injected.lgas) ? injected.lgas : [];
 const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [];
+// Use all_lgas_for_search for comprehensive search coverage
+const allLgasForSearch = Array.isArray(injected.all_lgas_for_search) ? injected.all_lgas_for_search : [];
 const stateOptions = ['All Nigeria', ...(injected.states || [])];
 const urlParams = new URLSearchParams(window.parent.location.search);
 const testingMode = ['1', 'true', 'yes'].includes((urlParams.get('testing') || '').toLowerCase());
@@ -252,15 +254,64 @@ function queueEvent(type, details = {}) {
   pushStateToPython();
 }
 
+// Map focus labels to data columns
+const FOCUS_COLUMNS = {
+  'All risk': 'risk_total',
+  'Child mortality': 'u5mr',
+  'Facility access': 'fac',
+  'Connectivity': 'towers',
+  '5km coverage': 'cov'
+};
+
+// Columns where higher values are better (ascending sort)
+const ASCENDING_FOCUS = {
+  'fac': true,
+  'towers': true,
+  'cov': true
+};
+
 function hotspotsBase() {
-  if (hotspotsPayload.length) return hotspotsPayload;
-  return [...lgas]
+  // Use all_lgas_for_search if available, otherwise fall back to lgas
+  // This ensures comprehensive search across all LGAs in the selected state
+  const searchSource = allLgasForSearch.length > 0 ? allLgasForSearch : lgas;
+  
+  // Always use the full lgas array and sort by current focus
+  const focusColumn = FOCUS_COLUMNS[currentFocus] || 'risk_total';
+  const ascending = ASCENDING_FOCUS[focusColumn] || false;
+  
+  // Filter by current state first
+  let filtered = searchSource;
+  if (currentState && currentState !== 'All Nigeria') {
+    filtered = searchSource.filter(l => String(l.state) === String(currentState));
+  }
+  
+  return [...filtered]
     .sort((a, b) => {
-      const aScore = safeNum(a.risk_total) != null ? safeNum(a.risk_total) / 10 : Number(a.risk ?? 0);
-      const bScore = safeNum(b.risk_total) != null ? safeNum(b.risk_total) / 10 : Number(b.risk ?? 0);
-      return bScore - aScore;
+      let aScore, bScore;
+      
+      if (focusColumn === 'risk_total') {
+        aScore = safeNum(a.risk_total) != null ? safeNum(a.risk_total) : Number(a.risk ?? 0) * 10;
+        bScore = safeNum(b.risk_total) != null ? safeNum(b.risk_total) : Number(b.risk ?? 0) * 10;
+      } else {
+        aScore = safeNum(a[focusColumn]) ?? 0;
+        bScore = safeNum(b[focusColumn]) ?? 0;
+      }
+      
+      if (ascending) {
+        return aScore - bScore; // Lower is better for these metrics
+      }
+      return bScore - aScore; // Higher is better (or higher risk)
     })
     .map((l, i) => ({ ...l, rank: i + 1 }));
+}
+
+// Configurable limit for hotspots display - can be overridden via URL param
+let hotspotDisplayLimit = 12;
+if (urlParams.get('hotspot_limit')) {
+  const parsed = parseInt(urlParams.get('hotspot_limit'), 10);
+  if (!isNaN(parsed) && parsed > 0) {
+    hotspotDisplayLimit = parsed;
+  }
 }
 
 function renderHotspots() {
@@ -274,7 +325,8 @@ function renderHotspots() {
     : base;
 
   list.replaceChildren();
-  filtered.slice(0, 12).forEach((lga, i) => {
+  // Show up to hotspotDisplayLimit LGAs (default 12, configurable via URL param hotspot_limit)
+  filtered.slice(0, hotspotDisplayLimit).forEach((lga, i) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'hotspot-card';
@@ -472,6 +524,14 @@ function renderDetail() {
   `
     : '';
 
+  // Check if this LGA is already in compare list
+  const isInCompare = compareLGAs.some(l => String(l.id) === String(lga.id));
+  const compareBtnHtml = currentDepth >= 1 ? `
+    <button type="button" class="dl-btn ${isInCompare ? 'compare-btn-added' : ''}" id="add-to-compare-btn">
+      ${isInCompare ? '✓ In Compare List' : '+ Add to Compare'}
+    </button>
+  ` : '';
+
   inner.innerHTML = `
     <div class="detail-header">
       <div>
@@ -484,6 +544,7 @@ function renderDetail() {
       </div>
       <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close details">×</button>
     </div>
+    ${compareBtnHtml}
 
     <div class="metric-grid">
       <div class="metric-cell">
@@ -552,6 +613,15 @@ function renderDetail() {
 
   document.getElementById('detail-close-btn')?.addEventListener('click', closeDrawer);
   document.getElementById('download-lga-btn')?.addEventListener('click', downloadLGA);
+  document.getElementById('add-to-compare-btn')?.addEventListener('click', () => {
+    if (isInCompare) {
+      // Already in compare, do nothing (or could remove)
+      return;
+    }
+    addCompareSlot();
+    // Re-render to update button state
+    renderDetail();
+  });
 }
 
 function setDepth(depth) {
@@ -567,6 +637,7 @@ function setDepth(depth) {
 function setFocus(focus) {
   currentFocus = focus;
   syncHeader();
+  renderHotspots(); // Re-render hotspots with new focus sorting
   pushStateToPython();
   queueEvent('focus_change', { focus: currentFocus });
 }
@@ -641,8 +712,87 @@ function renderCompareSlots() {
 }
 
 function runCompare() {
-  const names = compareLGAs.map((l) => sanitizeText(l.name, 'LGA'));
-  alert(`Compare view: ${names.join(' vs ')}`);
+  if (compareLGAs.length < 2) {
+    alert('Please add at least 2 LGAs to compare');
+    return;
+  }
+  
+  // Build comparison table HTML
+  const metrics = [
+    { key: 'risk', label: 'Risk Score', format: (v) => riskLabel(v) },
+    { key: 'fac', label: 'Facilities / 10k', format: (v) => fmtMetric(v) },
+    { key: 'dist', label: 'Avg Distance (km)', format: (v) => fmtMetric(v) },
+    { key: 'u5mr', label: 'U5 Mortality Rate', format: (v) => fmtMetric(v) },
+    { key: 'cov', label: '5km Coverage %', format: (v) => fmtMetric(v) },
+    { key: 'towers', label: 'Towers / 10k', format: (v) => fmtMetric(v) },
+  ];
+  
+  let tableHtml = `
+    <div class="compare-overlay" id="compare-overlay">
+      <div class="compare-modal">
+        <div class="compare-header">
+          <h2>Compare LGAs</h2>
+          <button type="button" class="close-btn" id="compare-close-btn" aria-label="Close comparison">×</button>
+        </div>
+        <div class="compare-body">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                ${compareLGAs.map(l => `<th>${escapeHtml(sanitizeText(l.name, 'LGA'))}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+  `;
+  
+  metrics.forEach(metric => {
+    tableHtml += `<tr><td class="metric-name">${metric.label}</td>`;
+    compareLGAs.forEach(lga => {
+      const val = safeNum(lga[metric.key]);
+      tableHtml += `<td class="metric-val">${metric.format(val)}</td>`;
+    });
+    tableHtml += '</tr>';
+  });
+  
+  tableHtml += `
+            </tbody>
+          </table>
+        </div>
+        <div class="compare-footer">
+          <button type="button" class="dl-btn" id="compare-download-btn">Download Comparison (CSV)</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Remove existing overlay if any
+  const existing = document.getElementById('compare-overlay');
+  if (existing) existing.remove();
+  
+  // Add overlay to body
+  document.body.insertAdjacentHTML('beforeend', tableHtml);
+  
+  // Wire up close button
+  document.getElementById('compare-close-btn')?.addEventListener('click', () => {
+    document.getElementById('compare-overlay')?.remove();
+  });
+  
+  // Wire up download button
+  document.getElementById('compare-download-btn')?.addEventListener('click', () => {
+    const headers = ['Metric', ...compareLGAs.map(l => sanitizeText(l.name, 'LGA'))];
+    const rows = metrics.map(metric => {
+      return [metric.label, ...compareLGAs.map(lga => metric.format(safeNum(lga[metric.key])))];
+    });
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'lga_comparison.csv';
+    a.click();
+  });
+  
+  // Open the overlay
+  openOverlay('compare-overlay');
 }
 
 function initMap() {
@@ -817,7 +967,8 @@ function renderMap() {
 function renderMapTable() {
   const tableWrap = document.getElementById('map-table');
   if (!tableWrap) return;
-  const rows = lgas.slice(0, 200);
+  // Show all LGAs (no artificial limit)
+  const rows = lgas;
   const header = `
     <thead>
       <tr>
@@ -844,7 +995,9 @@ function renderMapTable() {
       }).join('')}
     </tbody>
   `;
-  tableWrap.innerHTML = `<table class="map-table-inner">${header}${body}</table>`;
+  // Add count indicator
+  const countInfo = `<div class="map-table-count">Showing all ${rows.length} LGAs</div>`;
+  tableWrap.innerHTML = countInfo + `<table class="map-table-inner">${header}${body}</table>`;
 }
 
 function toggleMapTable() {
@@ -1204,6 +1357,8 @@ function wireEvents() {
   stateSelect.addEventListener('change', (e) => {
     currentState = e.target.value;
     syncHeader();
+    renderHotspots();
+    renderMap();
     pushStateToPython();
     queueEvent('filter_change', { state: currentState });
   });
@@ -1213,6 +1368,11 @@ function wireEvents() {
   yearSelect.addEventListener('change', (e) => {
     currentYear = e.target.value;
     syncHeader();
+    // Re-render hotspots and map to reflect year change
+    renderHotspots();
+    renderMap();
+    // Update the header to show user data changed
+    setApplyStatus(`Year updated to ${currentYear}`, 'updating');
     pushStateToPython();
     queueEvent('filter_change', { year: currentYear });
   });
