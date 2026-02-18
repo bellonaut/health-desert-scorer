@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HEALTHDESERT · Global</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+:root {
+  --bg:       #090b10;
+  --surface:  #0f1117;
+  --surface2: #171b26;
+  --border:   rgba(255,255,255,0.06);
+  --text:     #e8eaf0;
+  --muted:    #9ca3af;
+  --dim:      #4b5563;
+  --accent:   #f97316;
+  --accent2:  rgba(249,115,22,0.15);
+  --canada:   #38bdf8;
+  --canada2:  rgba(56,189,248,0.12);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  overflow: hidden;
+}
+
+/* ── Grain overlay ─────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+  pointer-events: none;
+}
+
+/* ── Scan line ─────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 1;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.04) 2px,
+    rgba(0,0,0,0.04) 4px
+  );
+  pointer-events: none;
+}
+
+/* ── Globe SVG ─────────────────────────────────────── */
+#globe-wrap {
+  position: fixed; inset: 0; z-index: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+#globe-svg {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+#globe-svg.loaded { opacity: 1; }
+
+/* ── Header ────────────────────────────────────────── */
+header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24px 36px;
+}
+
+.wordmark {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: clamp(14px, 2vw, 18px);
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+.wordmark span { color: var(--accent); }
+.wordmark sub {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.15em;
+  color: var(--muted);
+  vertical-align: middle;
+  margin-left: 10px;
+}
+
+.header-right {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  text-transform: uppercase;
+  display: flex; gap: 24px; align-items: center;
+}
+
+.header-tag {
+  display: flex; align-items: center; gap: 6px;
+}
+
+.dot-pulse {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(1.4); }
+}
+
+/* ── Hero text ─────────────────────────────────────── */
+.hero {
+  position: fixed; z-index: 10;
+  bottom: 0; left: 0; right: 0;
+  padding: 0 36px 36px;
+  display: flex; align-items: flex-end; justify-content: space-between;
+  pointer-events: none;
+}
+
+.hero-left { max-width: 520px; }
+
+.hero-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 0.4s forwards;
+}
+
+.hero-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: clamp(32px, 5vw, 64px);
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 16px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 0.6s forwards;
+}
+
+.hero-title em {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.hero-sub {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  max-width: 380px;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 0.8s forwards;
+}
+
+.hero-right {
+  text-align: right;
+  pointer-events: auto;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 1.0s forwards;
+}
+
+.stat-stack {
+  display: flex; flex-direction: column; gap: 6px;
+  align-items: flex-end;
+}
+
+.stat-line {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+
+.stat-line span { color: var(--muted); }
+
+/* ── Country cards ─────────────────────────────────── */
+.country-card {
+  position: fixed; z-index: 20;
+  width: 280px;
+  background: rgba(9,11,16,0.94);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.country-card.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.card-flag {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.card-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.card-tag {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.card-metric {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.card-metric-val {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.card-metric-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.card-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 7px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card-btn-ng {
+  background: var(--accent2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.card-btn-ng:hover {
+  background: rgba(249,115,22,0.25);
+}
+
+.card-btn-ca {
+  background: var(--canada2);
+  border-color: rgba(56,189,248,0.3);
+  color: var(--canada);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.card-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+}
+.card-close:hover { color: var(--text); }
+
+/* ── Tooltip ───────────────────────────────────────── */
+.globe-tooltip {
+  position: fixed; z-index: 15;
+  background: rgba(9,11,16,0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.globe-tooltip.show { opacity: 1; }
+
+/* ── Instruction hint ──────────────────────────────── */
+.hint {
+  position: fixed;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  text-transform: uppercase;
+  opacity: 0;
+  animation: fadeUp 0.8s ease 1.4s forwards;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Globe path styles (set via JS attr) ───────────── */
+.country-path {
+  cursor: pointer;
+  transition: fill 0.2s;
+}
+
+/* ── Animations ────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes markerPop {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+.pulse-ring {
+  pointer-events: none;
+}
+
+/* ── Responsive ────────────────────────────────────── */
+@media (max-width: 600px) {
+  header { padding: 16px 20px; }
+  .header-right { display: none; }
+  .hero { padding: 0 20px 24px; }
+  .hero-title { font-size: clamp(28px, 8vw, 40px); }
+  .hero-right { display: none; }
+  .hint { bottom: 20px; }
+  .country-card { width: calc(100vw - 40px); left: 20px !important; right: 20px !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- Globe -->
+<div id="globe-wrap">
+  <svg id="globe-svg"></svg>
+</div>
+
+<!-- Tooltip -->
+<div class="globe-tooltip" id="tooltip"></div>
+
+<!-- Header -->
+<header>
+  <div class="wordmark">
+    HEALTH<span>DESERT</span>
+    <sub>GLOBAL PLATFORM</sub>
+  </div>
+  <div class="header-right">
+    <div class="header-tag">
+      <div class="dot-pulse"></div>
+      LIVE · NG
+    </div>
+    <div class="header-tag">ML-POWERED RISK INTELLIGENCE</div>
+  </div>
+</header>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="hero-left">
+    <div class="hero-eyebrow">Healthcare Access Intelligence</div>
+    <div class="hero-title">Where care<br>is <em>hardest</em><br>to reach.</div>
+    <div class="hero-sub">
+      Geospatial machine learning that surfaces health access barriers
+      at the sub-national level — built for planners, researchers,
+      and frontline coordinators.
+    </div>
+  </div>
+  <div class="hero-right">
+    <div class="stat-stack">
+      <div class="stat-line"><span>774</span> LGAs modelled</div>
+      <div class="stat-line"><span>2</span> DHS survey waves</div>
+      <div class="stat-line"><span>5</span> access dimensions</div>
+      <div class="stat-line"><span>1</span> country live · more coming</div>
+    </div>
+  </div>
+</div>
+
+<!-- Hint -->
+<div class="hint">↗ tap a country to explore</div>
+
+<!-- Country cards (hidden until click) -->
+<div class="country-card" id="card-ng" style="display:none">
+  <button class="card-close" id="close-ng">×</button>
+  <div class="card-flag">🇳🇬</div>
+  <div class="card-name" style="color:#f97316">HEALTHDESERT · NG</div>
+  <div class="card-tag" style="color:#f97316">Live · Nigeria</div>
+  <div class="card-metrics">
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#f97316">774</div>
+      <div class="card-metric-label">LGAs</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#f97316">5</div>
+      <div class="card-metric-label">Risk dims</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#f97316">2</div>
+      <div class="card-metric-label">Survey yrs</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#f97316">U5MR</div>
+      <div class="card-metric-label">Primary signal</div>
+    </div>
+  </div>
+  <a href="/ng" target="_self" rel="noopener" class="card-btn card-btn-ng" id="open-ng-link">
+    OPEN NIGERIA DASHBOARD →
+  </a>
+</div>
+
+<div class="country-card" id="card-ca" style="display:none">
+  <button class="card-close" id="close-ca">×</button>
+  <div class="card-flag">🇨🇦</div>
+  <div class="card-name" style="color:#38bdf8">HEALTHDESERT · CA</div>
+  <div class="card-tag" style="color:#38bdf8">Coming soon · Canada</div>
+  <div class="card-metrics">
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#38bdf8">5000+</div>
+      <div class="card-metric-label">Census divs</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#38bdf8">CIHI</div>
+      <div class="card-metric-label">Data source</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#38bdf8">13</div>
+      <div class="card-metric-label">Provinces</div>
+    </div>
+    <div class="card-metric">
+      <div class="card-metric-val" style="color:#38bdf8">FNMI</div>
+      <div class="card-metric-label">Focus layer</div>
+    </div>
+  </div>
+  <div class="card-btn card-btn-ca">IN DEVELOPMENT · 2026</div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────
+const NIGERIA_ID = 566;
+const CANADA_ID  = 124;
+
+// Country centroids [lon, lat]
+const CENTROIDS = {
+  [NIGERIA_ID]: [8.68,  9.08],
+  [CANADA_ID]:  [-96.8, 56.1],
+};
+
+const COUNTRY_META = {
+  [NIGERIA_ID]: { name: 'Nigeria',      status: 'live',    card: 'card-ng', color: '#f97316' },
+  [CANADA_ID]:  { name: 'Canada',       status: 'soon',    card: 'card-ca', color: '#38bdf8' },
+};
+
+function resolveNigeriaRoute() {
+  const host = (window.location.hostname || '').toLowerCase();
+  const isStreamlitHost = host.endsWith('streamlit.app');
+  return isStreamlitHost ? '/?app=ng' : '/ng';
+}
+
+function wireNigeriaLink() {
+  const ngLink = document.getElementById('open-ng-link');
+  if (!ngLink) return;
+
+  const targetHref = resolveNigeriaRoute();
+  ngLink.setAttribute('href', targetHref);
+
+  ngLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.location.href = targetHref;
+        return;
+      }
+    } catch (err) {
+      // Fallback to same-window navigation below.
+    }
+    window.location.href = targetHref;
+  });
+}
+
+wireNigeriaLink();
+
+// ── Globe setup ────────────────────────────────────────────────────
+const svg    = d3.select('#globe-svg');
+const wrap   = document.getElementById('globe-wrap');
+const W      = () => wrap.clientWidth;
+const H      = () => wrap.clientHeight;
+const R      = () => Math.min(W(), H()) * 0.44;
+
+let width = W(), height = H(), radius = R();
+
+svg.attr('width', width).attr('height', height);
+
+const projection = d3.geoOrthographic()
+  .scale(radius)
+  .center([0, 0])
+  .rotate([-20, -15, 0])
+  .translate([width / 2, height / 2]);
+
+const pathGen = d3.geoPath().projection(projection);
+
+// ── Defs: glow filters ────────────────────────────────────────────
+const defs = svg.append('defs');
+
+function makeGlow(id, color, stdDev = 6) {
+  const f = defs.append('filter').attr('id', id).attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
+  f.append('feGaussianBlur').attr('in', 'SourceGraphic').attr('stdDeviation', stdDev).attr('result', 'blur');
+  f.append('feColorMatrix').attr('in', 'blur').attr('type', 'matrix')
+    .attr('values', `0 0 0 0 ${hexToRgb(color, 'r')}  0 0 0 0 ${hexToRgb(color, 'g')}  0 0 0 0 ${hexToRgb(color, 'b')}  0 0 0 18 -7`).attr('result', 'glow');
+  const merge = f.append('feMerge');
+  merge.append('feMergeNode').attr('in', 'glow');
+  merge.append('feMergeNode').attr('in', 'SourceGraphic');
+}
+
+function hexToRgb(hex, ch) {
+  const r = parseInt(hex.slice(1,3),16)/255;
+  const g = parseInt(hex.slice(3,5),16)/255;
+  const b = parseInt(hex.slice(5,7),16)/255;
+  return { r, g, b }[ch];
+}
+
+makeGlow('glow-ng', '#f97316', 8);
+makeGlow('glow-ca', '#38bdf8', 8);
+
+// ── Sphere + graticule ─────────────────────────────────────────────
+svg.append('circle')
+  .attr('class', 'sphere')
+  .attr('cx', width/2).attr('cy', height/2).attr('r', radius)
+  .attr('fill', '#0c0f18')
+  .attr('stroke', 'rgba(255,255,255,0.05)')
+  .attr('stroke-width', 1);
+
+const graticule = d3.geoGraticule().step([15, 15]);
+
+svg.append('path')
+  .datum(graticule())
+  .attr('class', 'graticule')
+  .attr('d', pathGen)
+  .attr('fill', 'none')
+  .attr('stroke', 'rgba(255,255,255,0.04)')
+  .attr('stroke-width', 0.5);
+
+// ── Countries ──────────────────────────────────────────────────────
+const countriesG = svg.append('g').attr('class', 'countries');
+const markersG   = svg.append('g').attr('class', 'markers');
+
+const tooltip  = document.getElementById('tooltip');
+let activeCard = null;
+let hovering   = false;
+const pulseIntervals = [];
+let pulseAnimationStarted = false;
+
+function showCard(id, x, y) {
+  const meta = COUNTRY_META[id];
+  if (!meta) return;
+
+  // Hide any open card first
+  if (activeCard && activeCard !== meta.card) {
+    hideCard(activeCard);
+  }
+
+  const card = document.getElementById(meta.card);
+  if (!card) return;
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  card.style.display = 'block';
+
+  // Position: prefer right of click, flip if too close to edge
+  let cx = x + 20;
+  let cy = y - 40;
+  if (cx + 300 > vw) cx = x - 300;
+  if (cy + 320 > vh) cy = vh - 330;
+  if (cy < 80)       cy = 80;
+
+  card.style.left = cx + 'px';
+  card.style.top  = cy + 'px';
+
+  requestAnimationFrame(() => card.classList.add('visible'));
+  activeCard = meta.card;
+}
+
+function hideCard(cardId) {
+  const card = document.getElementById(cardId || activeCard);
+  if (!card) return;
+  card.classList.remove('visible');
+  setTimeout(() => { card.style.display = 'none'; }, 260);
+  if (!cardId || cardId === activeCard) activeCard = null;
+}
+
+document.getElementById('close-ng').addEventListener('click', () => hideCard('card-ng'));
+document.getElementById('close-ca').addEventListener('click', () => hideCard('card-ca'));
+
+// ── Load world data ────────────────────────────────────────────────
+fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+  .then(r => r.json())
+  .then(world => {
+    const countries = topojson.feature(world, world.objects.countries);
+
+    // Draw countries
+    countriesG.selectAll('path.country-path')
+      .data(countries.features)
+      .enter()
+      .append('path')
+      .attr('class', 'country-path')
+      .attr('d', pathGen)
+      .attr('fill', d => {
+        const id = +d.id;
+        if (id === NIGERIA_ID) return 'rgba(249,115,22,0.45)';
+        if (id === CANADA_ID)  return 'rgba(56,189,248,0.18)';
+        return '#1a1f2e';
+      })
+      .attr('stroke', d => {
+        const id = +d.id;
+        if (id === NIGERIA_ID) return 'rgba(249,115,22,0.8)';
+        if (id === CANADA_ID)  return 'rgba(56,189,248,0.4)';
+        return 'rgba(255,255,255,0.06)';
+      })
+      .attr('stroke-width', d => {
+        const id = +d.id;
+        return (id === NIGERIA_ID || id === CANADA_ID) ? 1.2 : 0.4;
+      })
+      .attr('filter', d => {
+        const id = +d.id;
+        if (id === NIGERIA_ID) return 'url(#glow-ng)';
+        if (id === CANADA_ID)  return 'url(#glow-ca)';
+        return null;
+      })
+      .on('mouseover', function(event, d) {
+        const id = +d.id;
+        const meta = COUNTRY_META[id];
+        hovering = true;
+
+        if (meta) {
+          tooltip.textContent = meta.status === 'live'
+            ? `${meta.name} · Click to explore`
+            : `${meta.name} · Coming 2026`;
+          tooltip.classList.add('show');
+        }
+
+        if (id !== NIGERIA_ID && id !== CANADA_ID) {
+          d3.select(this).attr('fill', '#232840');
+        }
+      })
+      .on('mousemove', function(event) {
+        tooltip.style.left = (event.clientX + 14) + 'px';
+        tooltip.style.top  = (event.clientY - 28) + 'px';
+      })
+      .on('mouseout', function(event, d) {
+        const id = +d.id;
+        hovering = false;
+        tooltip.classList.remove('show');
+
+        if (id !== NIGERIA_ID && id !== CANADA_ID) {
+          d3.select(this).attr('fill', '#1a1f2e');
+        }
+      })
+      .on('click', function(event, d) {
+        const id = +d.id;
+        if (!COUNTRY_META[id]) return;
+        showCard(id, event.clientX, event.clientY);
+      });
+
+    // Draw markers for active/coming-soon countries
+    drawMarkers();
+
+    // Globe loaded
+    document.getElementById('globe-svg').classList.add('loaded');
+
+    // Start rotation
+    startRotation();
+    animatePulseRings();
+  })
+  .catch(err => {
+    console.error('Failed to load world data:', err);
+    document.getElementById('globe-svg').classList.add('loaded');
+  });
+
+// ── Markers ────────────────────────────────────────────────────────
+function drawMarkers() {
+  Object.entries(CENTROIDS).forEach(([id, lonlat]) => {
+    const meta = COUNTRY_META[+id];
+    const projected = projection(lonlat);
+    if (!projected) return;
+
+    const g = markersG.append('g')
+      .attr('class', 'marker')
+      .attr('transform', `translate(${projected[0]}, ${projected[1]})`)
+      .style('cursor', 'pointer')
+      .on('click', function(event) {
+        showCard(+id, event.clientX, event.clientY);
+      });
+
+    const color = meta.color;
+
+    if (meta.status === 'live') {
+      // Pulse rings (2 staggered), animated via JS for Safari/Firefox compatibility.
+      [0, 1].forEach(i => {
+        g.append('circle')
+          .attr('class', `pulse-ring pulse-ring-${i}`)
+          .attr('data-phase', i)
+          .attr('r', 8)
+          .attr('fill', 'none')
+          .attr('stroke', color)
+          .attr('stroke-width', 1.2)
+          .attr('opacity', 0);
+      });
+    }
+
+    // Core dot
+    g.append('circle')
+      .attr('r', meta.status === 'live' ? 5 : 4)
+      .attr('fill', color)
+      .attr('stroke', '#090b10')
+      .attr('stroke-width', 1.5)
+      .attr('filter', `url(#glow-${id == NIGERIA_ID ? 'ng' : 'ca'})`);
+
+    // Label
+    const label = g.append('g').attr('transform', 'translate(10, -10)');
+
+    label.append('rect')
+      .attr('rx', 3)
+      .attr('fill', 'rgba(9,11,16,0.85)')
+      .attr('stroke', color)
+      .attr('stroke-width', 0.5);
+
+    const text = label.append('text')
+      .attr('x', 6).attr('y', 11)
+      .attr('fill', color)
+      .attr('font-family', 'IBM Plex Mono, monospace')
+      .attr('font-size', 9)
+      .attr('letter-spacing', '0.1em');
+
+    const label_text = meta.status === 'live'
+      ? (id == NIGERIA_ID ? 'NG · LIVE' : 'CA · LIVE')
+      : (id == CANADA_ID  ? 'CA · 2026' : '');
+
+    text.text(label_text);
+
+    // Fit rect to text
+    requestAnimationFrame(() => {
+      try {
+        const bb = text.node().getBBox();
+        label.select('rect')
+          .attr('x', bb.x - 6).attr('y', bb.y - 3)
+          .attr('width', bb.width + 12).attr('height', bb.height + 6);
+      } catch(e) {}
+    });
+  });
+}
+
+function animatePulseRings() {
+  if (pulseAnimationStarted) return;
+  const rings = Array.from(document.querySelectorAll('.pulse-ring'));
+  if (!rings.length) return;
+  pulseAnimationStarted = true;
+
+  rings.forEach((ring, idx) => {
+    const phase = Number(ring.getAttribute('data-phase') || (idx % 2));
+    const delay = phase * 1200;
+    const duration = 2400;
+
+    const runCycle = () => {
+      let elapsed = 0;
+      const step = () => {
+        elapsed += 16;
+        const progress = Math.min(elapsed / duration, 1);
+        const radius = 6 + progress * 24;
+        const opacity = 0.7 * (1 - progress);
+        ring.setAttribute('r', radius.toFixed(2));
+        ring.setAttribute('opacity', opacity.toFixed(3));
+        if (progress < 1) {
+          requestAnimationFrame(step);
+          return;
+        }
+        ring.setAttribute('r', '6');
+        ring.setAttribute('opacity', '0');
+      };
+      requestAnimationFrame(step);
+    };
+
+    setTimeout(() => {
+      runCycle();
+      const interval = window.setInterval(runCycle, duration);
+      pulseIntervals.push(interval);
+    }, delay);
+  });
+}
+
+// ── Rotation ───────────────────────────────────────────────────────
+let rotation   = [-20, -15, 0];
+let rafId      = null;
+let isDragging = false;
+let dragStart  = null;
+let rotStart   = null;
+
+function startRotation() {
+  const speed = 0.08;
+
+  function tick() {
+    if (!isDragging && !hovering) {
+      rotation[0] += speed;
+      projection.rotate(rotation);
+      redraw();
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function redraw() {
+  // Countries
+  countriesG.selectAll('path.country-path').attr('d', pathGen);
+
+  // Graticule
+  svg.select('.graticule').attr('d', pathGen);
+
+  // Markers — reproject
+  markersG.selectAll('.marker').each(function(d, i) {
+    const id = Object.keys(CENTROIDS)[i];
+    if (!id) return;
+    const ll = CENTROIDS[id];
+    const p  = projection(ll);
+    if (p) {
+      d3.select(this).attr('transform', `translate(${p[0]}, ${p[1]})`);
+    }
+  });
+}
+
+// ── Drag to rotate ────────────────────────────────────────────────
+svg.call(d3.drag()
+  .on('start', event => {
+    isDragging = true;
+    dragStart  = [event.x, event.y];
+    rotStart   = [...rotation];
+  })
+  .on('drag', event => {
+    const dx = event.x - dragStart[0];
+    const dy = event.y - dragStart[1];
+    const sens = 0.3;
+    rotation[0] = rotStart[0] + dx * sens;
+    rotation[1] = rotStart[1] - dy * sens;
+    projection.rotate(rotation);
+    redraw();
+  })
+  .on('end', () => { isDragging = false; })
+);
+
+// ── Resize ─────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  width  = W(); height = H(); radius = R();
+  svg.attr('width', width).attr('height', height);
+  svg.select('.sphere')
+    .attr('cx', width/2).attr('cy', height/2).attr('r', radius);
+  projection
+    .scale(radius)
+    .translate([width/2, height/2]);
+  redraw();
+});
+
+window.addEventListener('beforeunload', () => {
+  pulseIntervals.forEach((id) => clearInterval(id));
+  pulseIntervals.length = 0;
+});
+</script>
+</body>
+</html>

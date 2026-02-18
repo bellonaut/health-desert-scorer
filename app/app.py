@@ -29,8 +29,23 @@ SESSION_DEFAULTS: Mapping[str, Any] = {
 }
 
 PAGES_DIR = Path(__file__).resolve().parent / "pages"
+GLOBAL_HTML_PATH = Path(__file__).resolve().parent / "static" / "global.html"
 METHOD_ICON = "\U0001F4CA"
 GLOSSARY_ICON = "\U0001F4D6"
+GLOBAL_ICON = "\U0001F30D"
+NG_ROUTE_HINT_KEYS = {
+    "state",
+    "focus",
+    "depth",
+    "lga",
+    "compare",
+    "year",
+    "mobile",
+    "testing",
+    "persona",
+    "session",
+    "evt",
+}
 
 
 def _page_path(suffix: str) -> str:
@@ -38,6 +53,38 @@ def _page_path(suffix: str) -> str:
     if matches:
         return f"pages/{matches[0].name}"
     return f"pages/{suffix}"
+
+
+def _get_query_params() -> Mapping[str, Any]:
+    try:
+        return st.query_params  # Streamlit 1.30+
+    except Exception:  # pragma: no cover - fallback for older versions
+        return st.experimental_get_query_params()
+
+
+def _last_param_value(value: Any) -> str:
+    if isinstance(value, list):
+        if not value:
+            return ""
+        value = value[-1]
+    return str(value)
+
+
+def _resolve_app_route() -> str:
+    params = _get_query_params()
+
+    for key in ("app", "page", "route"):
+        if key not in params:
+            continue
+        route = _last_param_value(params[key]).strip().lower()
+        if route in {"ng", "nigeria", "app", "dashboard"}:
+            return "ng"
+        if route in {"global", "landing", "home", "index"}:
+            return "global"
+
+    if any(key in params for key in NG_ROUTE_HINT_KEYS):
+        return "ng"
+    return "global"
 
 
 def _init_session_state() -> None:
@@ -48,10 +95,7 @@ def _init_session_state() -> None:
 
 def _hydrate_from_query_params() -> None:
     """Pull incoming query params set by the JS layer into session_state."""
-    try:
-        params = st.query_params  # Streamlit 1.30+
-    except Exception:  # pragma: no cover - fallback for older versions
-        params = st.experimental_get_query_params()
+    params = _get_query_params()
 
     def _maybe_set(name: str, target: str, cast=None) -> None:
         if name not in params:
@@ -115,57 +159,7 @@ def _hydrate_from_query_params() -> None:
             st.session_state["hd_last_evt"] = evt_raw
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def _cached_load(
-    source_mode: str,
-    boundary_resolution: str,
-    is_mobile: bool,
-    zoom: float | None,
-) -> tuple[Any, Any]:
-    from data_api import load_backend_data
-
-    return load_backend_data(
-        source_mode=source_mode,
-        boundary_resolution=boundary_resolution,
-        is_mobile=is_mobile,
-        zoom=zoom,
-    )
-
-
-def main() -> None:
-    st.set_page_config(
-        page_title="HEALTHDESERT \u00b7 NG",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-        menu_items=None,
-    )
-    _init_session_state()
-    _hydrate_from_query_params()
-
-    with st.sidebar:
-        st.markdown("### Transparency")
-        st.page_link(_page_path("Methodology.py"), label=f"{METHOD_ICON} Methodology")
-        st.page_link(_page_path("Glossary.py"), label=f"{GLOSSARY_ICON} Glossary")
-
-    is_mobile = bool(st.session_state.get("hd_is_mobile"))
-
-    @safe_execute("Load backend data")
-    def _load() -> tuple[Any, Any]:
-        return _cached_load(
-            source_mode="gold_first",
-            boundary_resolution="auto",
-            is_mobile=is_mobile,
-            zoom=None,
-        )
-
-    data = _load()
-    if data is None:
-        st.stop()
-
-    geo_df, shap_df = data
-    if st.session_state.get("hd_year") is None:
-        st.session_state["hd_year"] = latest_year(geo_df)
-
+def _inject_full_bleed_styles() -> None:
     # Full-bleed: remove Streamlit padding/chrome and force iframe to viewport size
     st.markdown(
         """
@@ -244,6 +238,77 @@ def main() -> None:
     )
     st.markdown("<style>html, body {overflow:hidden !important;}</style>", unsafe_allow_html=True)
 
+
+def _render_global_landing() -> None:
+    if not GLOBAL_HTML_PATH.exists():
+        st.error(f"Global landing page not found: `{GLOBAL_HTML_PATH}`")
+        st.stop()
+
+    html = GLOBAL_HTML_PATH.read_text(encoding="utf-8")
+    st.components.v1.html(html, height=10000, scrolling=False)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _cached_load(
+    source_mode: str,
+    boundary_resolution: str,
+    is_mobile: bool,
+    zoom: float | None,
+) -> tuple[Any, Any]:
+    from data_api import load_backend_data
+
+    return load_backend_data(
+        source_mode=source_mode,
+        boundary_resolution=boundary_resolution,
+        is_mobile=is_mobile,
+        zoom=zoom,
+    )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="HEALTHDESERT",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+        menu_items=None,
+    )
+
+    route = _resolve_app_route()
+    _init_session_state()
+
+    if route == "global":
+        _inject_full_bleed_styles()
+        _render_global_landing()
+        return
+
+    _hydrate_from_query_params()
+
+    with st.sidebar:
+        st.markdown("### Transparency")
+        st.markdown(f"[{GLOBAL_ICON} Global platform](?app=global)")
+        st.page_link(_page_path("Methodology.py"), label=f"{METHOD_ICON} Methodology")
+        st.page_link(_page_path("Glossary.py"), label=f"{GLOSSARY_ICON} Glossary")
+
+    is_mobile = bool(st.session_state.get("hd_is_mobile"))
+
+    @safe_execute("Load backend data")
+    def _load() -> tuple[Any, Any]:
+        return _cached_load(
+            source_mode="gold_first",
+            boundary_resolution="auto",
+            is_mobile=is_mobile,
+            zoom=None,
+        )
+
+    data = _load()
+    if data is None:
+        st.stop()
+
+    geo_df, shap_df = data
+    if st.session_state.get("hd_year") is None:
+        st.session_state["hd_year"] = latest_year(geo_df)
+
+    _inject_full_bleed_styles()
     render_embedded_app(geo_df, shap_df, st.session_state)
     show_system_status(
         data_last_updated=geo_df.attrs.get("data_last_updated"),
