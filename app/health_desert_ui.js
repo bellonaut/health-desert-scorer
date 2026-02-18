@@ -53,11 +53,19 @@ const lgaById = new Map(lgas.map((l) => [String(l.id), l]));
 const featureLayerById = new Map();
 const fieldValuesCache = new Map();
 
+function mergeLga(base, detail) {
+  const merged = { ...(base || {}), ...(detail || {}) };
+  if ((merged.shap == null) && base && base.shap != null) {
+    merged.shap = base.shap;
+  }
+  return merged;
+}
+
 const selectedId = meta.selected_lga || (injected.selected && injected.selected.id);
 let selectedLGA = null;
 if (selectedId) {
   const base = lgaById.get(String(selectedId)) || {};
-  selectedLGA = { ...base, ...(injected.selected || {}) };
+  selectedLGA = mergeLga(base, injected.selected || {});
 } else if (injected.selected) {
   selectedLGA = injected.selected;
 }
@@ -618,7 +626,14 @@ function renderDetail() {
     return;
   }
 
-  const lga = selectedLGA;
+  let lga = selectedLGA;
+  if (selectedLGA?.id) {
+    const base = lgaById.get(String(selectedLGA.id));
+    if (base) {
+      lga = mergeLga(base, selectedLGA);
+      selectedLGA = lga;
+    }
+  }
   const isResearch = currentDepth >= 1;
 
   const distPct = 100 - (percentileRank('dist', safeNum(lga.dist)) ?? 50);
@@ -877,7 +892,7 @@ function selectLGA(id) {
 
   selectedLGA = { ...base };
   if (injected.selected && String(injected.selected.id) === String(id)) {
-    selectedLGA = { ...selectedLGA, ...injected.selected };
+    selectedLGA = mergeLga(selectedLGA, injected.selected);
   }
 
   renderHotspots();

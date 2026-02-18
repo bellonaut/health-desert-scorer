@@ -231,7 +231,9 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
     filtered = filter_geo(geo_df, state_filter=state_filter, year=year)
-    include_shap = depth >= 1 and (str(year).lower() != "both")
+    # Always include SHAP for single-year views so client-side depth toggles
+    # don't temporarily render stale records without attribution.
+    include_shap = str(year).lower() != "both"
     lga_records = _records_from_geo(
         filtered,
         include_shap=include_shap,
@@ -239,7 +241,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     )
 
     hotspots = get_ranked_hotspots(geo_df, focus, state_filter=state_filter, year=year, limit=12)
-    shap_allowed = depth >= 1 and (str(year).lower() != "both")
+    shap_allowed = str(year).lower() != "both"
     selected_detail = get_lga_detail(geo_df, shap_df if shap_allowed else None, selected_lga, year=year) if selected_lga else None
 
     risk_norm = normalize_for_choropleth(filtered, "risk_score")
