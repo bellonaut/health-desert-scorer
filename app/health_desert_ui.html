@@ -24,43 +24,44 @@
 
 <header>
   <div class="logo">HEALTH<span>DESERT</span> · NG</div>
-  <div class="header-divider"></div>
+  <div class="header-divider" aria-hidden="true"></div>
+  <div class="header-desktop-controls">
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <span class="icon meta-icon">STATE</span>
+      <select id="state-select" class="state-select" aria-label="Select state"></select>
+    </div>
 
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <span class="icon meta-icon">STATE</span>
-    <select id="state-select" class="state-select" aria-label="Select state"></select>
-  </div>
+    <div class="state-pill year-pill">
+      <span class="pill-dot"></span>
+      <span class="icon meta-icon">YEAR</span>
+      <select id="year-select" class="year-select" aria-label="Select year">
+        <option value="2013">2013</option>
+        <option value="2018">2018</option>
+        <option value="Both">Both</option>
+      </select>
+    </div>
 
-  <div class="state-pill year-pill">
-    <span class="pill-dot"></span>
-    <span class="icon meta-icon">YEAR</span>
-    <select id="year-select" class="year-select" aria-label="Select year">
-      <option value="2013">2013</option>
-      <option value="2018">2018</option>
-      <option value="Both">Both</option>
-    </select>
-  </div>
-
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <a href="/Methodology" target="_blank" rel="noopener noreferrer" class="meta-link" id="methodology-link">📊 Methodology</a>
-  </div>
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <a href="/Glossary" target="_blank" rel="noopener noreferrer" class="meta-link" id="glossary-link">📖 Glossary</a>
-  </div>
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <button type="button" class="meta-link-btn" id="share-open-btn">Share</button>
-  </div>
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <button type="button" class="meta-link-btn" id="export-open-btn">Export</button>
-  </div>
-  <div class="state-pill">
-    <span class="pill-dot"></span>
-    <button type="button" class="meta-link-btn" id="tour-restart-btn">Tour</button>
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <a href="/Methodology" target="_blank" rel="noopener noreferrer" class="meta-link" id="methodology-link">📊 Methodology</a>
+    </div>
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <a href="/Glossary" target="_blank" rel="noopener noreferrer" class="meta-link" id="glossary-link">📖 Glossary</a>
+    </div>
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <button type="button" class="meta-link-btn" id="share-open-btn">Share</button>
+    </div>
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <button type="button" class="meta-link-btn" id="export-open-btn">Export</button>
+    </div>
+    <div class="state-pill">
+      <span class="pill-dot"></span>
+      <button type="button" class="meta-link-btn" id="tour-restart-btn">Tour</button>
+    </div>
   </div>
 
   <div id="dataset-meta" class="dataset-meta">
@@ -73,9 +74,12 @@
     <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">DETAIL</button>
     <button type="button" class="depth-btn" data-depth="2" aria-pressed="false">RESEARCH</button>
   </div>
+
+  <button type="button" class="mobile-more-btn" id="mobile-more-btn"
+          aria-label="More options" title="More">&#8942;</button>
 </header>
 
-<div class="res-note">Tip: use the map and pull up details for any LGA</div>
+<div class="res-note">Tip: tap any LGA on the map to see details</div>
 
 <div class="main" id="main-content" role="main">
   <div class="left-panel" id="filters" role="region" aria-label="Filters and results">
@@ -113,6 +117,25 @@
 
   <div class="map-area" id="results" role="region" aria-label="Map and layers">
     <div id="map-leaflet" class="map-leaflet"></div>
+    <div class="depth-toggle depth-toggle-mobile" aria-label="View depth">
+      <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">OVR</button>
+      <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">DTL</button>
+      <button type="button" class="depth-btn" data-depth="2" aria-pressed="false">RES</button>
+    </div>
+    <div class="map-filters-mobile">
+      <div class="map-filter-pill">
+        <span class="pill-dot"></span>
+        <select id="state-select-mobile" class="state-select" aria-label="Select state"></select>
+      </div>
+      <div class="map-filter-pill">
+        <span class="pill-dot"></span>
+        <select id="year-select-mobile" class="year-select" aria-label="Select year">
+          <option value="2013">2013</option>
+          <option value="2018">2018</option>
+          <option value="Both">Both</option>
+        </select>
+      </div>
+    </div>
 
     <div class="layer-strip">
       <button type="button" class="layer-btn active" data-layer="Risk score" aria-pressed="true">Risk score</button>
@@ -133,7 +156,7 @@
 
     <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
     <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
-    <div class="map-credit">made by bashir aminu bello 2016</div>
+    <div class="map-credit">made by bashir aminu bello 2026</div>
 
     <div class="data-footnote" id="data-footnote">DHS 2013/2018 · NHFR · OpenCellID · Model v1.2</div>
   </div>
@@ -180,6 +203,24 @@
       </div>
       <div class="export-help" id="export-help">CSV is compatible with Excel and Google Sheets.</div>
       <button type="button" class="dl-btn" id="export-download-btn">Download</button>
+    </div>
+  </div>
+</div>
+
+<div class="drawer-overlay" id="mobile-more-drawer" aria-hidden="true">
+  <div class="drawer-panel" role="dialog" aria-label="More options">
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-title">More options</div>
+        <div class="drawer-subtitle">Quick access to supporting actions and metadata.</div>
+      </div>
+      <button type="button" class="close-btn" id="mobile-more-close-btn" aria-label="Close more options">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <a href="/Methodology" target="_blank" rel="noopener noreferrer" class="share-link" id="mobile-more-methodology-link">Methodology</a>
+      <a href="/Glossary" target="_blank" rel="noopener noreferrer" class="share-link" id="mobile-more-glossary-link">Glossary</a>
+      <button type="button" class="dl-btn" id="mobile-more-tour-btn">Restart tour</button>
+      <div class="share-url" id="mobile-more-meta-text">Dataset metadata</div>
     </div>
   </div>
 </div>

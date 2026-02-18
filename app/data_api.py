@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -186,7 +185,6 @@ def _data_last_updated(gold_df: pd.DataFrame) -> str | None:
     return str(pd.to_datetime(gold_df["estimate_as_of"], errors="coerce").max().date())
 
 
-@lru_cache(maxsize=4)
 def load_backend_data(
     source_mode: str = "gold_first",
     boundary_resolution: str = "auto",

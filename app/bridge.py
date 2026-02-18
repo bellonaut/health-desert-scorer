@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 from data_api import (
@@ -25,9 +27,36 @@ CSS_PATH = APP_DIR / "health_desert_ui.css"
 JS_PATH = APP_DIR / "health_desert_ui.js"
 
 
-def _json_default(obj: Any) -> str:
+def _json_default(obj: Any) -> Any:
+    """Exhaustive JSON serialization fallback for numpy/pandas/shapely types."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return None if np.isnan(obj) else float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if obj is pd.NA or obj is pd.NaT:
+        return None
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat() if not pd.isnull(obj) else None
+    if isinstance(obj, np.datetime64):
+        ts = pd.Timestamp(obj)
+        return ts.isoformat() if not pd.isnull(ts) else None
+    try:
+        from shapely.geometry.base import BaseGeometry
+
+        if isinstance(obj, BaseGeometry):
+            return None
+    except ImportError:
+        pass
     if isinstance(obj, Path):
         return str(obj)
+    if isinstance(obj, (set, frozenset)):
+        return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
@@ -42,13 +71,39 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _coerce(value: Any) -> Any:
+    """Convert any value to a JSON-safe Python native type."""
+    if value is None:
+        return None
+    if value is pd.NA or value is pd.NaT:
+        return None
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return None if np.isnan(value) else float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat() if not pd.isnull(value) else None
+    if isinstance(value, np.datetime64):
+        ts = pd.Timestamp(value)
+        return ts.isoformat() if not pd.isnull(ts) else None
+    if isinstance(value, (set, frozenset)):
+        return list(value)
+    return value
+
+
 def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for row in filtered_df.itertuples():
         rec: dict[str, Any] = {
             "id": str(getattr(row, "lga_uid")),
-            "name": getattr(row, "lga_name"),
-            "state": getattr(row, "state_name"),
+            "name": _coerce(getattr(row, "lga_name")),
+            "state": _coerce(getattr(row, "state_name")),
             "risk": _safe_float(getattr(row, "risk_score", None)),
             "risk_total": _safe_float(getattr(row, "risk_score_total", None)),
             "fac": _safe_float(getattr(row, "facilities_per_10k", None)),
@@ -58,11 +113,11 @@ def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str,
             "cov": _safe_float(getattr(row, "coverage_5km", None)),
             "towers": _safe_float(getattr(row, "towers_per_10k", None)),
             "density": _safe_float(getattr(row, "population_density", None)),
-            "year": getattr(row, "year", None),
+            "year": _coerce(getattr(row, "year", None)),
             "confidence_pct": _safe_float(getattr(row, "confidence_pct", None)),
-            "confidence_reason_codes": getattr(row, "confidence_reason_codes", None),
-            "primary_barriers": getattr(row, "primary_barriers", None),
-            "recommendation": getattr(row, "recommendation", None),
+            "confidence_reason_codes": _coerce(getattr(row, "confidence_reason_codes", None)),
+            "primary_barriers": _coerce(getattr(row, "primary_barriers", None)),
+            "recommendation": _coerce(getattr(row, "recommendation", None)),
         }
         if include_shap:
             rec["shap"] = None  # populated per-selection to keep payload light
@@ -75,6 +130,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     state_filter = session_state.get("hd_state_filter", "All Nigeria")
     focus = session_state.get("hd_focus", "All risk")
     depth = int(session_state.get("hd_depth", 0) or 0)
+    is_mobile = bool(session_state.get("hd_is_mobile"))
     selected_lga = session_state.get("hd_selected_lga")
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
@@ -82,7 +138,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     lga_records = _records_from_geo(filtered, include_shap=depth >= 2)
 
     hotspots = get_ranked_hotspots(geo_df, focus, state_filter=state_filter, year=year, limit=12)
-    shap_allowed = depth >= 2 and (str(year).lower() != "both")
+    shap_allowed = depth >= 2 and not is_mobile and (str(year).lower() != "both")
     selected_detail = get_lga_detail(geo_df, shap_df if shap_allowed else None, selected_lga, year=year) if selected_lga else None
 
     risk_norm = normalize_for_choropleth(filtered, "risk_score")
@@ -90,6 +146,11 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
         {"id": rec["id"], "risk_norm": risk_norm[idx], "risk": rec["risk"]}
         for idx, rec in enumerate(lga_records)
     ]
+
+    if is_mobile:
+        geojson_columns = ("lga_uid",)
+    else:
+        geojson_columns = ("lga_uid", "lga_name", "state_name", "risk_score")
 
     payload: dict[str, Any] = {
         "meta": {
@@ -111,7 +172,12 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
         "hotspots": hotspots,
         "selected": selected_detail,
         "map": {
-            "geojson": get_lgas_geojson(geo_df, state_filter=state_filter, year=year),
+            "geojson": get_lgas_geojson(
+                geo_df,
+                state_filter=state_filter,
+                year=year,
+                columns=geojson_columns,
+            ),
             "choropleth": map_values,
         },
     }
@@ -119,8 +185,17 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
 
 
 def inject_data_to_html(html_path: Path, data: dict[str, Any]) -> str:
+    try:
+        json_str = json.dumps(data, default=_json_default)
+    except TypeError as exc:
+        st.error(
+            "**Data serialization error** - a field in the payload contains a "
+            f"non-JSON-serializable value. Check bridge.py.\n\n`{exc}`"
+        )
+        st.stop()
+
     html = html_path.read_text(encoding="utf-8")
-    injection = f"<script>window.__INITIAL_DATA__ = {json.dumps(data, default=_json_default)};</script>"
+    injection = f"<script>window.__INITIAL_DATA__ = {json_str};</script>"
 
     css_text = CSS_PATH.read_text(encoding="utf-8")
     js_text = JS_PATH.read_text(encoding="utf-8")
@@ -143,7 +218,7 @@ def render_embedded_app(
     shap_df,
     session_state: Mapping[str, Any],
     html_path: Path = HTML_PATH,
-    height: int = 1100,
+    height: int = 10000,
 ) -> None:
     payload = build_payload(geo_df, shap_df, session_state)
     injected = inject_data_to_html(html_path, payload)

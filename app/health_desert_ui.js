@@ -1,3 +1,28 @@
+// Detect mobile early and round-trip state to Streamlit before app init.
+(function detectAndReportMobile() {
+  const isMobileNow = window.innerWidth <= 768
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+
+  document.documentElement.setAttribute('data-mobile', isMobileNow ? '1' : '0');
+  if (isMobileNow) document.body.classList.add('is-mobile');
+  else document.body.classList.remove('is-mobile');
+
+  try {
+    const url = new URL(window.parent.location.href);
+    const current = url.searchParams.get('mobile');
+    const next = isMobileNow ? '1' : '0';
+    if (current !== next) {
+      url.searchParams.set('mobile', next);
+      window.parent.history.replaceState({}, '', url.toString());
+      setTimeout(() => {
+        window.parent.location.reload();
+      }, 100);
+    }
+  } catch (e) {
+    // Cross-origin iframe restrictions: no-op.
+  }
+})();
+
 // Data injected from Streamlit
 const injected = window.__INITIAL_DATA__ || {};
 const meta = injected.meta || {};
@@ -19,7 +44,7 @@ let currentDepth = Number(meta.depth || 0);
 let currentFocus = meta.focus || 'All risk';
 let currentYear = meta.year != null ? String(meta.year) : '2018';
 let currentLayer = 'Risk score';
-let isMobile = false;
+let isMobile = document.documentElement.getAttribute('data-mobile') === '1';
 let pendingEvent = null;
 
 const lgaById = new Map(lgas.map((l) => [String(l.id), l]));
@@ -148,6 +173,23 @@ function syncHeader() {
   const focusScope = document.getElementById('focus-scope');
   if (focusScope) focusScope.textContent = currentState;
 
+  const stateSelect = document.getElementById('state-select');
+  if (stateSelect && stateSelect.value !== currentState) {
+    stateSelect.value = currentState;
+  }
+  const stateSelectMobile = document.getElementById('state-select-mobile');
+  if (stateSelectMobile && stateSelectMobile.value !== currentState) {
+    stateSelectMobile.value = currentState;
+  }
+  const yearSelect = document.getElementById('year-select');
+  if (yearSelect && yearSelect.value !== currentYear) {
+    yearSelect.value = currentYear;
+  }
+  const yearSelectMobile = document.getElementById('year-select-mobile');
+  if (yearSelectMobile && yearSelectMobile.value !== currentYear) {
+    yearSelectMobile.value = currentYear;
+  }
+
   document.querySelectorAll('.depth-btn').forEach((btn) => {
     const depthVal = Number(btn.dataset.depth || 0);
     const active = depthVal === currentDepth;
@@ -169,6 +211,7 @@ function syncHeader() {
   }
 
   setApplyStatus('Applied', 'applied');
+  syncMobileMoreMeta();
 }
 
 function applyDepthVisibility() {
@@ -180,7 +223,7 @@ function applyDepthVisibility() {
   });
 
   const strip = document.getElementById('compare-strip');
-  if (strip) strip.classList.toggle('visible', currentDepth >= 1);
+  if (strip) strip.classList.toggle('visible', currentDepth >= 1 || isMobile);
 }
 
 function buildStateUrl() {
@@ -325,13 +368,23 @@ function renderHotspots() {
     : base;
 
   list.replaceChildren();
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'hotspot-empty';
+    empty.textContent = query
+      ? `No LGAs match "${query}".`
+      : `No LGAs available for ${currentState} in ${currentYear}.`;
+    list.appendChild(empty);
+    return;
+  }
+
   // Show up to hotspotDisplayLimit LGAs (default 12, configurable via URL param hotspot_limit)
   filtered.slice(0, hotspotDisplayLimit).forEach((lga, i) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'hotspot-card';
     if (String(selectedLGA?.id) === String(lga.id)) card.classList.add('active');
-    card.style.animationDelay = `${i * 0.04}s`;
+    card.style.animationDelay = isMobile ? '0s' : `${i * 0.04}s`;
     card.setAttribute('aria-label', `Select ${sanitizeText(lga.name, 'LGA')}`);
 
     const rank = document.createElement('div');
@@ -377,15 +430,60 @@ function renderHotspots() {
 function openDrawer() {
   const drawer = document.getElementById('detail-drawer');
   if (drawer) drawer.classList.add('open');
+
+  if (isMobile && !document.getElementById('drawer-backdrop')) {
+    const bd = document.createElement('div');
+    bd.id = 'drawer-backdrop';
+    bd.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.4);';
+    bd.addEventListener('click', closeDrawer);
+    (document.querySelector('.app-shell') || document.body).appendChild(bd);
+  }
 }
 
 function closeDrawer() {
   const drawer = document.getElementById('detail-drawer');
   if (drawer) drawer.classList.remove('open');
+  document.getElementById('drawer-backdrop')?.remove();
   selectedLGA = null;
   renderHotspots();
   renderMap();
   pushStateToPython();
+}
+
+function initBottomSheetDrag() {
+  const drawer = document.getElementById('detail-drawer');
+  if (!drawer) return;
+
+  if (!drawer.querySelector('.drag-handle')) {
+    const handle = document.createElement('div');
+    handle.className = 'drag-handle';
+    handle.setAttribute('aria-label', 'Drag to close');
+    drawer.insertBefore(handle, drawer.firstChild);
+  }
+
+  let startY = 0;
+  let isDragging = false;
+
+  drawer.addEventListener('touchstart', (e) => {
+    startY = e.touches[0].clientY;
+    isDragging = true;
+  }, { passive: true });
+
+  drawer.addEventListener('touchmove', (e) => {
+    if (!isDragging) return;
+    const delta = e.touches[0].clientY - startY;
+    if (delta > 0) {
+      drawer.style.transform = `translateY(${delta}px)`;
+    }
+  }, { passive: true });
+
+  drawer.addEventListener('touchend', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    const delta = e.changedTouches[0].clientY - startY;
+    drawer.style.transform = '';
+    if (delta > 80) closeDrawer();
+  }, { passive: true });
 }
 
 function percentileRank(field, value) {
@@ -610,18 +708,6 @@ function renderDetail() {
       <button type="button" class="dl-btn" id="download-lga-btn">↓ Download LGA data (CSV)</button>
     </div>
   `;
-
-  document.getElementById('detail-close-btn')?.addEventListener('click', closeDrawer);
-  document.getElementById('download-lga-btn')?.addEventListener('click', downloadLGA);
-  document.getElementById('add-to-compare-btn')?.addEventListener('click', () => {
-    if (isInCompare) {
-      // Already in compare, do nothing (or could remove)
-      return;
-    }
-    addCompareSlot();
-    // Re-render to update button state
-    renderDetail();
-  });
 }
 
 function setDepth(depth) {
@@ -798,22 +884,55 @@ function runCompare() {
 function initMap() {
   if (mapInstance) return;
   mapInstance = L.map('map-leaflet', {
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: false,
     minZoom: 5,
     maxZoom: 12,
   }).setView([9.1, 8.7], 6);
+
+  L.control.zoom({ position: isMobile ? 'bottomright' : 'topleft' }).addTo(mapInstance);
 
   if (mapInstance.fullscreenControl == null && L.Control.Fullscreen) {
     mapInstance.addControl(new L.Control.Fullscreen({ position: 'topleft' }));
   }
 }
 
+function setMapEmptyState(message) {
+  const mapArea = document.querySelector('.map-area');
+  if (!mapArea) return;
+
+  let empty = document.getElementById('map-empty-state');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'map-empty-state';
+    empty.className = 'map-empty-state';
+    mapArea.appendChild(empty);
+  }
+
+  empty.textContent = message || 'Map data unavailable. Try refreshing.';
+}
+
+function clearMapEmptyState() {
+  document.getElementById('map-empty-state')?.remove();
+}
+
 function normalizeGeoJson() {
   if (baseGeoJson) return baseGeoJson;
 
-  let gj = injected.map?.geojson ? JSON.parse(injected.map.geojson) : null;
-  if (!gj) return null;
+  let gj = null;
+  if (injected.map?.geojson) {
+    try {
+      gj = JSON.parse(injected.map.geojson);
+    } catch (e) {
+      setMapEmptyState('Map data unavailable. Try refreshing.');
+      return null;
+    }
+  }
+
+  if (!gj || !Array.isArray(gj.features) || !gj.features.length) {
+    setMapEmptyState('Map data unavailable. Try refreshing.');
+    return null;
+  }
 
   if (Array.isArray(gj.features) && typeof turf !== 'undefined') {
     try {
@@ -826,6 +945,7 @@ function normalizeGeoJson() {
     }
   }
 
+  clearMapEmptyState();
   baseGeoJson = gj;
   return baseGeoJson;
 }
@@ -1035,6 +1155,13 @@ function updateShareDrawer() {
   if (x) x.href = `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}`;
   if (li) li.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`;
   if (wa) wa.href = `https://wa.me/?text=${encodeURIComponent(shareUrl)}`;
+}
+
+function syncMobileMoreMeta() {
+  const target = document.getElementById('mobile-more-meta-text');
+  if (!target) return;
+  const source = document.getElementById('dataset-meta-text');
+  target.textContent = source?.textContent || `${lgas.length} LGAs · ${currentYear}`;
 }
 
 function openOverlay(id) {
@@ -1335,13 +1462,17 @@ function applyHelpTooltips() {
 }
 
 function detectMobile() {
-  const next = window.matchMedia('(max-width: 768px)').matches;
+  const next = window.innerWidth <= 768
+    || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  document.documentElement.setAttribute('data-mobile', next ? '1' : '0');
   if (next !== isMobile) {
     isMobile = next;
     document.body.classList.toggle('is-mobile', isMobile);
+    applyDepthVisibility();
     pushStateToPython({ immediate: true });
   } else {
     document.body.classList.toggle('is-mobile', isMobile);
+    applyDepthVisibility();
   }
 }
 
@@ -1377,6 +1508,42 @@ function wireEvents() {
     queueEvent('filter_change', { year: currentYear });
   });
 
+  const stateMobile = document.getElementById('state-select-mobile');
+  if (stateMobile) {
+    stateMobile.replaceChildren();
+    stateOptions.forEach((st) => {
+      const opt = document.createElement('option');
+      opt.value = st;
+      opt.textContent = st;
+      stateMobile.appendChild(opt);
+    });
+    stateMobile.value = currentState;
+    stateMobile.addEventListener('change', (e) => {
+      currentState = e.target.value;
+      if (stateSelect) stateSelect.value = currentState;
+      syncHeader();
+      renderHotspots();
+      renderMap();
+      pushStateToPython();
+      queueEvent('filter_change', { state: currentState });
+    });
+  }
+
+  const yearMobile = document.getElementById('year-select-mobile');
+  if (yearMobile) {
+    yearMobile.value = currentYear;
+    yearMobile.addEventListener('change', (e) => {
+      currentYear = e.target.value;
+      if (yearSelect) yearSelect.value = currentYear;
+      syncHeader();
+      renderHotspots();
+      renderMap();
+      setApplyStatus(`Year updated to ${currentYear}`, 'updating');
+      pushStateToPython();
+      queueEvent('filter_change', { year: currentYear });
+    });
+  }
+
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.addEventListener('input', renderHotspots);
 
@@ -1398,6 +1565,23 @@ function wireEvents() {
   document.getElementById('map-table-toggle')?.addEventListener('click', toggleMapTable);
   const mapToggle = document.getElementById('map-table-toggle');
   if (mapToggle) mapToggle.setAttribute('aria-expanded', 'false');
+
+  document.getElementById('detail-drawer')?.addEventListener('click', (e) => {
+    if (e.target.closest('#detail-close-btn')) {
+      closeDrawer();
+      return;
+    }
+    if (e.target.closest('#download-lga-btn')) {
+      downloadLGA();
+      return;
+    }
+    if (e.target.closest('#add-to-compare-btn')) {
+      if (!compareLGAs.some((l) => String(l.id) === String(selectedLGA?.id))) {
+        addCompareSlot();
+        renderDetail();
+      }
+    }
+  });
 
   document.getElementById('share-open-btn')?.addEventListener('click', () => {
     updateShareDrawer();
@@ -1428,6 +1612,17 @@ function wireEvents() {
   });
   document.getElementById('export-download-btn')?.addEventListener('click', downloadExport);
 
+  document.getElementById('mobile-more-btn')?.addEventListener('click', () => {
+    syncMobileMoreMeta();
+    openOverlay('mobile-more-drawer');
+  });
+  document.getElementById('mobile-more-close-btn')?.addEventListener('click', () => closeOverlay('mobile-more-drawer'));
+  document.getElementById('mobile-more-tour-btn')?.addEventListener('click', () => {
+    closeOverlay('mobile-more-drawer');
+    tourIndex = 0;
+    openTour();
+  });
+
   document.getElementById('tour-restart-btn')?.addEventListener('click', () => {
     tourIndex = 0;
     openTour();
@@ -1446,7 +1641,9 @@ function wireEvents() {
 
   const methodLink = document.getElementById('methodology-link');
   const glossaryLink = document.getElementById('glossary-link');
-  [methodLink, glossaryLink].forEach((link) => {
+  const mobileMethodLink = document.getElementById('mobile-more-methodology-link');
+  const mobileGlossaryLink = document.getElementById('mobile-more-glossary-link');
+  [methodLink, glossaryLink, mobileMethodLink, mobileGlossaryLink].forEach((link) => {
     if (!link) return;
 
     const rawHref = link.getAttribute('href') || '';
@@ -1463,6 +1660,8 @@ function wireEvents() {
     link.setAttribute('target', '_blank');
     link.setAttribute('rel', 'noopener noreferrer');
   });
+
+  initBottomSheetDrag();
 }
 
 wireEvents();
@@ -1487,5 +1686,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   closeOverlay('share-drawer');
   closeOverlay('export-drawer');
+  closeOverlay('mobile-more-drawer');
   closeTour(false);
 });

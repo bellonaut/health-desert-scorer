@@ -10,7 +10,7 @@ from typing import Any, Mapping
 import streamlit as st
 
 from bridge import render_embedded_app
-from data_api import load_backend_data, latest_year
+from data_api import latest_year
 from utils.analytics import log_event
 from utils.error_handler import safe_execute, show_system_status
 
@@ -115,6 +115,23 @@ def _hydrate_from_query_params() -> None:
             st.session_state["hd_last_evt"] = evt_raw
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def _cached_load(
+    source_mode: str,
+    boundary_resolution: str,
+    is_mobile: bool,
+    zoom: float | None,
+) -> tuple[Any, Any]:
+    from data_api import load_backend_data
+
+    return load_backend_data(
+        source_mode=source_mode,
+        boundary_resolution=boundary_resolution,
+        is_mobile=is_mobile,
+        zoom=zoom,
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="HEALTHDESERT \u00b7 NG",
@@ -130,12 +147,14 @@ def main() -> None:
         st.page_link(_page_path("Methodology.py"), label=f"{METHOD_ICON} Methodology")
         st.page_link(_page_path("Glossary.py"), label=f"{GLOSSARY_ICON} Glossary")
 
+    is_mobile = bool(st.session_state.get("hd_is_mobile"))
+
     @safe_execute("Load backend data")
     def _load() -> tuple[Any, Any]:
-        return load_backend_data(
+        return _cached_load(
             source_mode="gold_first",
             boundary_resolution="auto",
-            is_mobile=bool(st.session_state.get("hd_is_mobile")),
+            is_mobile=is_mobile,
             zoom=None,
         )
 
@@ -169,6 +188,8 @@ def main() -> None:
         padding: 0 !important;
         width: 100vw;
         height: 100vh;
+        height: 100dvh;
+        min-height: -webkit-fill-available;
         position: fixed;
         inset: 0;
     }
@@ -188,9 +209,12 @@ def main() -> None:
     [data-testid="stToolbar"] { display: none !important; }
     header {visibility: hidden !important;}
     footer {visibility: hidden !important;}
-    iframe[title="st.components.v1.html"] {
+    iframe[title="st.components.v1.html"],
+    iframe[title="st.iframe"] {
         width: 100vw !important;
         height: 100vh !important;
+        height: 100dvh !important;
+        min-height: -webkit-fill-available !important;
         border: none !important;
         margin: 0 !important;
         padding: 0 !important;
@@ -199,6 +223,20 @@ def main() -> None:
         left: 0;
         right: 0;
         bottom: 0;
+    }
+    [data-testid="stCustomComponentV1"] {
+        height: 100vh !important;
+        height: 100dvh !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+    }
+    [data-testid="stElementContainer"]:has(> iframe[title="st.components.v1.html"]),
+    [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"]) {
+        height: 100vh !important;
+        height: 100dvh !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
 </style>
 """,
