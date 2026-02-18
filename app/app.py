@@ -30,6 +30,7 @@ SESSION_DEFAULTS: Mapping[str, Any] = {
 
 PAGES_DIR = Path(__file__).resolve().parent / "pages"
 GLOBAL_HTML_PATH = Path(__file__).resolve().parent / "static" / "global.html"
+SHAP_VALUES_PATH = Path(__file__).resolve().parent.parent / "data" / "processed" / "shap_values.csv"
 METHOD_ICON = "\U0001F4CA"
 GLOSSARY_ICON = "\U0001F4D6"
 GLOBAL_ICON = "\U0001F30D"
@@ -91,6 +92,14 @@ def _init_session_state() -> None:
     for key, value in SESSION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def _file_mtime(path: Path) -> float:
+    """Cache key helper: change when the file appears or is updated."""
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return -1.0
 
 
 def _hydrate_from_query_params() -> None:
@@ -341,7 +350,9 @@ def _cached_load(
     boundary_resolution: str,
     is_mobile: bool,
     zoom: float | None,
+    shap_values_mtime: float,
 ) -> tuple[Any, Any]:
+    # `shap_values_mtime` is intentionally unused except as a cache key input.
     from data_api import load_backend_data
 
     return load_backend_data(
@@ -386,6 +397,7 @@ def main() -> None:
             boundary_resolution="auto",
             is_mobile=is_mobile,
             zoom=None,
+            shap_values_mtime=_file_mtime(SHAP_VALUES_PATH),
         )
 
     data = _load()
