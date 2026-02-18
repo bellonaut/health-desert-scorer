@@ -714,7 +714,9 @@ function renderDetail() {
     : `
       <div class="research-empty">
         ${lga.shap == null
-          ? 'SHAP values are not yet available for this LGA. Run scripts/generate_shap.py.'
+          ? (String(currentYear).toLowerCase() === 'both'
+            ? 'Feature attribution is available for single-year views. Select 2013 or 2018.'
+            : 'Feature attribution is still loading for this LGA. If it persists, run scripts/generate_shap.py.')
           : 'No SHAP data available for this LGA/year combination.'}
       </div>
     `;
@@ -738,7 +740,7 @@ function renderDetail() {
   const confReasons = String(lga.confidence_reason_codes || '')
     .split('|')
     .map((r) => r.trim())
-    .filter(Boolean);
+    .filter((r) => r && r.toLowerCase() !== 'none');
   const confReasonHtml = confReasons.length
     ? confReasons.map((r) => `<div class="conf-reason-item">${escapeHtml(r)}</div>`).join('')
     : '<div class="conf-reason-item muted">No reason codes available</div>';

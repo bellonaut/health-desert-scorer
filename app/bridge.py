@@ -75,6 +75,51 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _year_key(value: Any) -> int | str | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        return int(float(value))
+    except Exception:
+        return str(value)
+
+
+def _build_shap_lookup(shap_df: pd.DataFrame | None) -> dict[tuple[str, int | str | None], dict[str, float]]:
+    if shap_df is None or shap_df.empty or "lga_name" not in shap_df.columns:
+        return {}
+
+    feature_cols = [c for c in shap_df.columns if c not in {"lga_name", "year", "is_synthetic", "shap_importance"}]
+    if not feature_cols:
+        return {}
+
+    numeric = shap_df[feature_cols].apply(pd.to_numeric, errors="coerce")
+    lookup: dict[tuple[str, int | str | None], dict[str, float]] = {}
+    for idx, row in shap_df.iterrows():
+        lga_name = str(row.get("lga_name"))
+        if not lga_name:
+            continue
+
+        shap_map: dict[str, float] = {}
+        for col in feature_cols:
+            val = numeric.at[idx, col]
+            if pd.notna(val):
+                shap_map[col] = float(val)
+        if not shap_map:
+            continue
+
+        y_key = _year_key(row.get("year")) if "year" in shap_df.columns else None
+        if y_key is not None:
+            lookup[(lga_name, y_key)] = shap_map
+        lookup.setdefault((lga_name, None), shap_map)
+
+    return lookup
+
+
 def _coerce(value: Any) -> Any:
     """Convert any value to a JSON-safe Python native type."""
     if value is None:
@@ -139,12 +184,20 @@ def _find_unserializable(obj: Any, path: str = "root") -> str | None:
         return f"{path} = {type(obj).__name__}({preview})"
 
 
-def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str, Any]]:
+def _records_from_geo(
+    filtered_df,
+    include_shap: bool = False,
+    shap_df: pd.DataFrame | None = None,
+) -> list[dict[str, Any]]:
+    shap_lookup = _build_shap_lookup(shap_df) if include_shap else {}
     records: list[dict[str, Any]] = []
     for row in filtered_df.itertuples():
+        lga_name = _coerce(getattr(row, "lga_name"))
+        year_value = _coerce(getattr(row, "year", None))
+        year_key = _year_key(year_value)
         rec: dict[str, Any] = {
             "id": str(getattr(row, "lga_uid")),
-            "name": _coerce(getattr(row, "lga_name")),
+            "name": lga_name,
             "state": _coerce(getattr(row, "state_name")),
             "risk": _safe_float(getattr(row, "risk_score", None)),
             "risk_total": _safe_float(getattr(row, "risk_score_total", None)),
@@ -155,14 +208,15 @@ def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str,
             "cov": _safe_float(getattr(row, "coverage_5km", None)),
             "towers": _safe_float(getattr(row, "towers_per_10k", None)),
             "density": _safe_float(getattr(row, "population_density", None)),
-            "year": _coerce(getattr(row, "year", None)),
+            "year": year_value,
             "confidence_pct": _safe_float(getattr(row, "confidence_pct", None)),
             "confidence_reason_codes": _coerce(getattr(row, "confidence_reason_codes", None)),
             "primary_barriers": _coerce(getattr(row, "primary_barriers", None)),
             "recommendation": _coerce(getattr(row, "recommendation", None)),
         }
         if include_shap:
-            rec["shap"] = None  # populated per-selection to keep payload light
+            by_year = shap_lookup.get((str(lga_name), year_key))
+            rec["shap"] = by_year if by_year is not None else shap_lookup.get((str(lga_name), None))
         records.append(rec)
     return records
 
@@ -177,7 +231,12 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
     filtered = filter_geo(geo_df, state_filter=state_filter, year=year)
-    lga_records = _records_from_geo(filtered, include_shap=depth >= 1)
+    include_shap = depth >= 1 and (str(year).lower() != "both")
+    lga_records = _records_from_geo(
+        filtered,
+        include_shap=include_shap,
+        shap_df=shap_df if include_shap else None,
+    )
 
     hotspots = get_ranked_hotspots(geo_df, focus, state_filter=state_filter, year=year, limit=12)
     shap_allowed = depth >= 1 and (str(year).lower() != "both")
