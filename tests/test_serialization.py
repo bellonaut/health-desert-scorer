@@ -24,6 +24,11 @@ if str(APP_DIR) not in sys.path:
 from bridge import _json_default, build_payload  # noqa: E402
 
 
+class _Opaque:
+    def __str__(self) -> str:
+        return "opaque-value"
+
+
 def test_numpy_types() -> None:
     cases = [
         (np.int64(5), 5),
@@ -31,9 +36,11 @@ def test_numpy_types() -> None:
         (np.float64(np.nan), None),
         (np.bool_(True), True),
         (np.array([1, 2]), [1, 2]),
+        (np.object_("opaque"), "opaque"),
         (pd.NA, None),
         (pd.NaT, None),
         (pd.Timestamp("2018-01-01"), "2018-01-01T00:00:00"),
+        (_Opaque(), "opaque-value"),
     ]
     for obj, expected in cases:
         assert _json_default(obj) == expected, f"Failed for {type(obj)}: {obj}"

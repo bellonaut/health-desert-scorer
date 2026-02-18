@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3.1] - 2026-02-18
+
+### Fixed
+- Hardened payload serialization in `app/bridge.py` so unknown values no longer crash `_json_default`.
+- Added field-level serialization diagnostics via `_find_unserializable` in `inject_data_to_html`.
+- Expanded `_coerce` to safely normalize opaque numpy/object scalar wrappers and nested containers.
+- Added regression coverage for opaque serialization fallbacks in `tests/test_serialization.py`.
+
+### Verification
+- `pytest -q tests/test_serialization.py`
+- `pytest -q`
+
 ## [1.3.0] - 2026-02-18
 
 ### Added
@@ -27,4 +39,3 @@ All notable changes to this project are documented in this file.
 - `make validate-gold`
 - `pytest -q`
 - `node --check app/health_desert_ui.js`
-

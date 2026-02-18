@@ -57,7 +57,11 @@ def _json_default(obj: Any) -> Any:
         return list(obj)
     if isinstance(obj, bytes):
         return obj.decode("utf-8", errors="replace")
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+    # Last resort: stringify instead of crashing the entire app.
+    try:
+        return str(obj)
+    except Exception:
+        return None
 
 
 def _safe_float(value: Any) -> float | None:
@@ -92,9 +96,47 @@ def _coerce(value: Any) -> Any:
     if isinstance(value, np.datetime64):
         ts = pd.Timestamp(value)
         return ts.isoformat() if not pd.isnull(ts) else None
-    if isinstance(value, (set, frozenset)):
-        return list(value)
-    return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_coerce(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _coerce(v) for k, v in value.items()}
+    # numpy.object_ and opaque numpy scalar wrappers.
+    if hasattr(value, "item"):
+        try:
+            return _coerce(value.item())
+        except Exception:
+            pass
+    if isinstance(value, (str, int, float, bool, list, dict)):
+        return value
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _find_unserializable(obj: Any, path: str = "root") -> str | None:
+    """Walk nested payloads to identify the first problematic field."""
+    try:
+        json.dumps(obj, default=_json_default)
+        return None
+    except Exception:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                found = _find_unserializable(value, f"{path}.{key}")
+                if found:
+                    return found
+        elif isinstance(obj, (list, tuple)):
+            for idx, value in enumerate(obj):
+                found = _find_unserializable(value, f"{path}[{idx}]")
+                if found:
+                    return found
+
+        preview = repr(obj)
+        if len(preview) > 80:
+            preview = preview[:80]
+        return f"{path} = {type(obj).__name__}({preview})"
 
 
 def _records_from_geo(filtered_df, include_shap: bool = False) -> list[dict[str, Any]]:
@@ -187,10 +229,12 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
 def inject_data_to_html(html_path: Path, data: dict[str, Any]) -> str:
     try:
         json_str = json.dumps(data, default=_json_default)
-    except TypeError as exc:
+    except Exception as exc:
+        bad_field = _find_unserializable(data) or "unknown"
         st.error(
-            "**Data serialization error** - a field in the payload contains a "
-            f"non-JSON-serializable value. Check bridge.py.\n\n`{exc}`"
+            f"**Serialization error** - {exc}\n\n"
+            f"**Offending field:** `{bad_field}`\n\n"
+            "Check bridge.py `_records_from_geo` for uncoerced types."
         )
         st.stop()
 
