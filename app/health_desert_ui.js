@@ -41,6 +41,8 @@ if (testingMode && !testSession) {
 
 let currentState = meta.state_filter || 'All Nigeria';
 let currentDepth = Number(meta.depth || 0);
+if (Number.isNaN(currentDepth) || currentDepth < 0) currentDepth = 0;
+if (currentDepth > 1) currentDepth = 1;
 let currentFocus = meta.focus || 'All risk';
 let currentYear = meta.year != null ? String(meta.year) : '2018';
 let currentLayer = 'Risk score';
@@ -239,6 +241,19 @@ function syncHeader() {
     footnote.textContent = `DHS 2013/2018 · NHFR · OpenCellID · Model ${modelVersion || 'v1.2'} · ${updated}`;
   }
 
+  const resNote = document.querySelector('.res-note');
+  if (resNote) {
+    if (currentDepth === 1) {
+      resNote.textContent = 'Research mode - SHAP attribution - Select an LGA to analyze';
+      resNote.style.borderBottom = '1px solid rgba(249,115,22,0.2)';
+      resNote.style.color = 'rgba(249,115,22,0.7)';
+    } else {
+      resNote.textContent = 'Tap any LGA on the map to see details';
+      resNote.style.borderBottom = '';
+      resNote.style.color = '';
+    }
+  }
+
   setApplyStatus('Applied', 'applied');
   syncMobileMoreMeta();
 }
@@ -252,7 +267,7 @@ function applyDepthVisibility() {
   });
 
   const strip = document.getElementById('compare-strip');
-  if (strip) strip.classList.toggle('visible', currentDepth >= 1 || isMobile);
+  if (strip) strip.classList.add('visible');
 }
 
 function buildStateUrl() {
@@ -598,14 +613,14 @@ function buildInterventions(lga) {
 
 function renderDetail() {
   const inner = document.getElementById('detail-inner');
-  if (!inner) return;
-
-  if (!selectedLGA) {
-    inner.replaceChildren();
+  if (!inner || !selectedLGA) {
+    if (inner) inner.replaceChildren();
     return;
   }
 
   const lga = selectedLGA;
+  const isResearch = currentDepth >= 1;
+
   const distPct = 100 - (percentileRank('dist', safeNum(lga.dist)) ?? 50);
   const facPct = percentileRank('fac', safeNum(lga.fac)) ?? 50;
   const u5Pct = 100 - (percentileRank('u5mr', safeNum(lga.u5mr)) ?? 50);
@@ -621,8 +636,13 @@ function renderDetail() {
   }
 
   const shapRows = lga.shap
-    ? Object.entries(lga.shap).sort((a, b) => Math.abs(Number(b[1] ?? 0)) - Math.abs(Number(a[1] ?? 0)))
+    ? Object.entries(lga.shap)
+      .filter(([k, v]) => k !== 'is_synthetic' && v != null && !Number.isNaN(Number(v)))
+      .sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))
     : [];
+  const maxShap = shapRows.length
+    ? Math.max(...shapRows.map(([, v]) => Math.abs(Number(v))))
+    : 1;
 
   const riskNum = safeNum(lga.risk);
   const riskTotal = safeNum(lga.risk_total);
@@ -651,26 +671,134 @@ function renderDetail() {
   `
     : '';
 
-  // Check if this LGA is already in compare list
-  const isInCompare = compareLGAs.some(l => String(l.id) === String(lga.id));
-  const compareBtnHtml = currentDepth >= 1 ? `
-    <button type="button" class="dl-btn ${isInCompare ? 'compare-btn-added' : ''}" id="add-to-compare-btn">
-      ${isInCompare ? '✓ In Compare List' : '+ Add to Compare'}
+  const isInCompare = compareLGAs.some((item) => String(item.id) === String(lga.id));
+  const compareBtnHtml = `
+    <button type="button"
+            class="compare-inline-btn ${isInCompare ? 'compare-btn-added' : ''}"
+            id="add-to-compare-btn">
+      ${isInCompare ? 'Added to compare' : 'Add to compare'}
     </button>
-  ` : '';
+  `;
+
+  const shapChartHtml = shapRows.map(([k, v]) => {
+    const n = Number(v);
+    const pct = Math.min((Math.abs(n) / maxShap) * 100, 100);
+    const isPos = n >= 0;
+    const label = k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    const absVal = Math.abs(n);
+    const magnitude = absVal > 0.1 ? 'high' : absVal > 0.04 ? 'medium' : 'low';
+
+    return `
+      <div class="shap-row-full" data-magnitude="${magnitude}">
+        <div class="shap-feature-full" title="${escapeHtml(k)}">${escapeHtml(label)}</div>
+        <div class="shap-bar-wrap">
+          <div class="shap-bar-fill ${isPos ? 'pos' : 'neg'}"
+               style="width:${pct}%"
+               title="${isPos ? 'Increases' : 'Decreases'} risk"></div>
+        </div>
+        <div class="shap-val-full ${isPos ? 'shap-pos-text' : 'shap-neg-text'}">
+          ${isPos ? '+' : '-'} ${absVal.toFixed(3)}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const shapBodyHtml = shapRows.length
+    ? `
+      <div class="shap-chart">${shapChartHtml}</div>
+      <div class="shap-legend">
+        <span class="shap-legend-item pos">+ Increases risk</span>
+        <span class="shap-legend-item neg">- Decreases risk</span>
+      </div>
+    `
+    : `
+      <div class="research-empty">
+        ${lga.shap == null
+          ? 'SHAP values are not yet available for this LGA. Run scripts/generate_shap.py.'
+          : 'No SHAP data available for this LGA/year combination.'}
+      </div>
+    `;
+
+  const shapHtml = isResearch
+    ? `
+      <div class="research-section">
+        <div class="research-section-title">
+          Feature Attribution
+          <span class="research-badge">SHAP</span>
+        </div>
+        <div class="research-explainer">
+          Each bar shows how much a feature pushes the risk score up (red) or down (green)
+          relative to the national average.
+        </div>
+        ${shapBodyHtml}
+      </div>
+    `
+    : '';
+
+  const confReasons = String(lga.confidence_reason_codes || '')
+    .split('|')
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const confReasonHtml = confReasons.length
+    ? confReasons.map((r) => `<div class="conf-reason-item">${escapeHtml(r)}</div>`).join('')
+    : '<div class="conf-reason-item muted">No reason codes available</div>';
+
+  const confDetailHtml = isResearch
+    ? `
+      <div class="research-section">
+        <div class="research-section-title">
+          Model Confidence
+          <span class="research-badge">${conf.emoji} ${conf.label}</span>
+        </div>
+        <div class="conf-reason-list">${confReasonHtml}</div>
+      </div>
+    `
+    : '';
+
+  const modelVersion = Array.isArray(meta.model_version)
+    ? meta.model_version.join(', ')
+    : (meta.model_version || 'v1.2');
+  const metaHtml = isResearch
+    ? `
+      <div class="research-section research-meta">
+        <div class="research-meta-row">
+          <span class="research-meta-label">DATA SOURCES</span>
+          <span>DHS ${escapeHtml(String(currentYear))} - NHFR 2020 - OpenCellID - WorldPop</span>
+        </div>
+        <div class="research-meta-row">
+          <span class="research-meta-label">MODEL</span>
+          <span>${escapeHtml(String(modelVersion))}</span>
+        </div>
+        <div class="research-meta-row">
+          <span class="research-meta-label">LAST UPDATED</span>
+          <span>${escapeHtml(String(meta.data_last_updated || 'Unknown'))}</span>
+        </div>
+        <div class="research-meta-row">
+          <span class="research-meta-label">BOUNDARY RES</span>
+          <span>${escapeHtml(String(meta.boundary_resolution || 'auto'))}</span>
+        </div>
+      </div>
+    `
+    : '';
+
+  const downloadHtml = isResearch
+    ? '<button type="button" class="dl-btn" id="download-lga-btn">Download LGA data (CSV)</button>'
+    : '';
 
   inner.innerHTML = `
     <div class="detail-header">
       <div>
         <div class="detail-lga">${escapeHtml(sanitizeText(lga.name, 'Unknown LGA'))}</div>
         <div class="detail-state-tag">
-          ${escapeHtml(sanitizeText(lga.state, 'Unknown state'))} · Risk score:
+          ${escapeHtml(sanitizeText(lga.state, 'Unknown state'))} - Risk score:
           <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum, riskTotal))}</span>
+          ${isResearch ? '<span class="research-mode-tag">RESEARCH</span>' : ''}
         </div>
         <div class="detail-state-tag">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)}</div>
       </div>
-      <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close details">×</button>
+      <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close">&times;</button>
     </div>
+
     ${compareBtnHtml}
 
     <div class="metric-grid">
@@ -717,28 +845,12 @@ function renderDetail() {
     <p class="action-note">Decision-support only. Always combine with local knowledge and community input.</p>
 
     ${interventionsSection}
-
-    <div class="depth-section ${currentDepth >= 2 && shapRows.length ? 'visible' : ''}" id="shap-section">
-      <div class="section-label">Feature contribution (SHAP)</div>
-      ${shapRows.length
-        ? shapRows.map(([k, v]) => {
-          const n = safeNum(v) ?? 0;
-          const width = Math.min(Math.abs(n) * 200, 100);
-          const sign = n >= 0 ? '+' : '';
-          return `
-            <div class="shap-row">
-              <div class="shap-feature">${escapeHtml(k)}</div>
-              <div class="shap-track"><div class="shap-fill ${n >= 0 ? 'pos' : 'neg'}" style="width:${width}%"></div></div>
-              <div class="shap-val">${sign}${n.toFixed(2)}</div>
-            </div>
-          `;
-        }).join('')
-        : '<div class="shap-row"><div class="shap-feature">No SHAP data</div></div>'}
-      <button type="button" class="dl-btn" id="download-lga-btn">↓ Download LGA data (CSV)</button>
-    </div>
+    ${shapHtml}
+    ${confDetailHtml}
+    ${metaHtml}
+    ${downloadHtml}
   `;
 }
-
 function setDepth(depth) {
   currentDepth = Number(depth);
   applyDepthVisibility();
@@ -787,6 +899,7 @@ function addCompareSlot() {
 function removeCompare(id) {
   compareLGAs = compareLGAs.filter((l) => String(l.id) !== String(id));
   renderCompareSlots();
+  if (selectedLGA) renderDetail();
   pushStateToPython();
 }
 
@@ -818,9 +931,14 @@ function renderCompareSlots() {
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'compare-slot compare-add-btn';
-    addBtn.textContent = '+ Add LGA';
+    addBtn.textContent = '+ Add current LGA';
     addBtn.addEventListener('click', addCompareSlot);
     slots.appendChild(addBtn);
+  }
+
+  const fabCount = document.getElementById('compare-fab-count');
+  if (fabCount) {
+    fabCount.textContent = compareLGAs.length > 0 ? String(compareLGAs.length) : '';
   }
 
   compareBtn.disabled = compareLGAs.length < 2;
@@ -1590,6 +1708,9 @@ function wireEvents() {
 
   document.getElementById('compare-go-btn')?.addEventListener('click', runCompare);
   document.getElementById('compare-add-btn')?.addEventListener('click', addCompareSlot);
+  document.getElementById('compare-fab')?.addEventListener('click', () => {
+    document.getElementById('compare-strip')?.scrollIntoView({ behavior: 'smooth' });
+  });
 
   document.getElementById('map-table-toggle')?.addEventListener('click', toggleMapTable);
   const mapToggle = document.getElementById('map-table-toggle');
@@ -1607,8 +1728,9 @@ function wireEvents() {
     if (e.target.closest('#add-to-compare-btn')) {
       if (!compareLGAs.some((l) => String(l.id) === String(selectedLGA?.id))) {
         addCompareSlot();
-        renderDetail();
       }
+      renderDetail();
+      return;
     }
   });
 

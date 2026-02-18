@@ -117,6 +117,19 @@ def _hydrate_from_query_params() -> None:
     _maybe_set("lga", "hd_selected_lga")
     _maybe_set("mobile", "hd_is_mobile", lambda val: str(val).lower() in {"1", "true", "yes"})
 
+    # Migrate old 3-level depth values to the current 2-level scheme:
+    # 0 = overview, 1 = research.
+    raw_depth = st.session_state.get("hd_depth", 0)
+    try:
+        depth_value = int(raw_depth)
+    except Exception:
+        depth_value = 0
+    if depth_value >= 2:
+        depth_value = 1
+    if depth_value < 0:
+        depth_value = 0
+    st.session_state["hd_depth"] = depth_value
+
     if "compare" in params:
         cmp_val = params["compare"]
         if isinstance(cmp_val, list):

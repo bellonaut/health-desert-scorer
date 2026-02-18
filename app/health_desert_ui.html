@@ -71,8 +71,7 @@
 
   <div class="depth-toggle">
     <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">OVERVIEW</button>
-    <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">DETAIL</button>
-    <button type="button" class="depth-btn" data-depth="2" aria-pressed="false">RESEARCH</button>
+    <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
   </div>
 
   <button type="button" class="mobile-more-btn" id="mobile-more-btn"
@@ -107,21 +106,28 @@
     </div>
 
     <div class="compare-strip" id="compare-strip">
-      <div class="compare-label">Compare LGAs</div>
-      <div class="compare-slots" id="compare-slots">
-        <button type="button" class="compare-slot compare-add-btn" id="compare-add-btn">+ Add LGA</button>
+      <div class="compare-label">
+        Compare LGAs
+        <button type="button" class="compare-help-btn" id="compare-help-btn"
+                title="Add LGAs to compare them side by side">?</button>
       </div>
-      <button type="button" class="compare-go" id="compare-go-btn" disabled>RUN COMPARISON →</button>
+      <div class="compare-slots" id="compare-slots">
+        <button type="button" class="compare-slot compare-add-btn" id="compare-add-btn">+ Add current LGA</button>
+      </div>
+      <button type="button" class="compare-go" id="compare-go-btn" disabled>RUN COMPARISON -&gt;</button>
     </div>
   </div>
 
   <div class="map-area" id="results" role="region" aria-label="Map and layers">
     <div id="map-leaflet" class="map-leaflet"></div>
     <div class="depth-toggle depth-toggle-mobile" aria-label="View depth">
-      <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">OVR</button>
-      <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">DTL</button>
-      <button type="button" class="depth-btn" data-depth="2" aria-pressed="false">RES</button>
+      <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
+      <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
     </div>
+    <button type="button" class="compare-fab" id="compare-fab"
+            aria-label="Compare LGAs" title="Compare LGAs">
+      Compare <span id="compare-fab-count"></span>
+    </button>
     <div class="map-filters-mobile">
       <div class="map-filter-pill">
         <span class="pill-dot"></span>
@@ -142,7 +148,7 @@
       <button type="button" class="layer-btn" data-layer="Facilities" aria-pressed="false">Facilities</button>
       <button type="button" class="layer-btn" data-layer="Connectivity" aria-pressed="false">Connectivity</button>
       <button type="button" class="layer-btn depth-gate depth-1" data-layer="Towers" aria-pressed="false">Towers</button>
-      <button type="button" class="layer-btn depth-gate depth-2" data-layer="SHAP" aria-pressed="false">SHAP</button>
+      <button type="button" class="layer-btn depth-gate depth-1" data-layer="SHAP" aria-pressed="false">SHAP</button>
     </div>
 
     <div class="map-legend">

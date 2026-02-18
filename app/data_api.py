@@ -283,12 +283,14 @@ def load_backend_data(
 
     if shap_df is not None:
         shap_df = shap_df.rename(columns={"lganame": "lga_name"})
-        feature_cols = [c for c in shap_df.columns if c not in {"lga_name", "year"}]
+        feature_cols = [c for c in shap_df.columns if c not in {"lga_name", "year", "is_synthetic"}]
         if feature_cols:
-            shap_df["shap_importance"] = shap_df[feature_cols].abs().sum(axis=1)
+            numeric_shap = shap_df[feature_cols].apply(pd.to_numeric, errors="coerce")
             join_keys = ["lga_name", "year"] if "year" in shap_df.columns else ["lga_name"]
+            shap_join = shap_df[join_keys].copy()
+            shap_join["shap_importance"] = numeric_shap.abs().sum(axis=1)
             merged = merged.merge(
-                shap_df[join_keys + ["shap_importance"]] if "shap_importance" in shap_df.columns else shap_df,
+                shap_join,
                 on=join_keys,
                 how="left",
             )
@@ -486,8 +488,9 @@ def get_shap_values(
     if subset.empty:
         return None
     row = subset.iloc[0]
-    drop_cols = [c for c in ["lga_name", "year"] if c in row.index]
+    drop_cols = [c for c in ["lga_name", "year", "is_synthetic", "shap_importance"] if c in row.index]
     values = row.drop(labels=drop_cols)
+    values = pd.to_numeric(values, errors="coerce")
     values = values[values.notna()]
     if values.empty:
         return None

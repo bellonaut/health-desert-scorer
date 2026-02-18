@@ -177,10 +177,10 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
     filtered = filter_geo(geo_df, state_filter=state_filter, year=year)
-    lga_records = _records_from_geo(filtered, include_shap=depth >= 2)
+    lga_records = _records_from_geo(filtered, include_shap=depth >= 1)
 
     hotspots = get_ranked_hotspots(geo_df, focus, state_filter=state_filter, year=year, limit=12)
-    shap_allowed = depth >= 2 and not is_mobile and (str(year).lower() != "both")
+    shap_allowed = depth >= 1 and (str(year).lower() != "both")
     selected_detail = get_lga_detail(geo_df, shap_df if shap_allowed else None, selected_lga, year=year) if selected_lga else None
 
     risk_norm = normalize_for_choropleth(filtered, "risk_score")
