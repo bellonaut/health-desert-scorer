@@ -79,6 +79,35 @@ let stateSyncTimer = null;
 let pendingStateUrl = '';
 let stateSyncLocked = false;
 
+function hideBootOverlay() {
+  const dismissFromDocument = (doc) => {
+    if (!doc) return false;
+    const overlay = doc.getElementById('hd-boot-overlay');
+    if (!overlay) return false;
+    overlay.classList.add('is-hidden');
+    window.setTimeout(() => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 320);
+    return true;
+  };
+
+  let dismissed = false;
+  try {
+    if (window.parent && window.parent !== window) {
+      dismissed = dismissFromDocument(window.parent.document);
+    }
+  } catch (err) {
+    // Cross-origin iframe restrictions: ignore and try local document.
+  }
+  if (!dismissed) dismissFromDocument(document);
+}
+
+function scheduleBootOverlayHide(delayMs = 0) {
+  window.setTimeout(() => {
+    window.requestAnimationFrame(() => hideBootOverlay());
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -1681,6 +1710,8 @@ if (selectedLGA) {
   openDrawer();
   renderDetail();
 }
+
+scheduleBootOverlayHide(80);
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;

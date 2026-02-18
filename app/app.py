@@ -170,12 +170,15 @@ def _inject_full_bleed_styles() -> None:
         width: 100% !important;
         height: 100% !important;
         overflow: hidden !important;
+        background: #090b10 !important;
+        color: #e8eaf0 !important;
     }
     .block-container, .main .block-container {
         padding: 0 !important;
         margin: 0 !important;
         max-width: 100% !important;
         width: 100% !important;
+        background: #090b10 !important;
     }
     .stApp {
         margin: 0 !important;
@@ -186,11 +189,13 @@ def _inject_full_bleed_styles() -> None:
         min-height: -webkit-fill-available;
         position: fixed;
         inset: 0;
+        background: #090b10 !important;
     }
     [data-testid="stAppViewContainer"] {
         padding: 0 !important;
         margin: 0 !important;
         overflow: hidden !important;
+        background: #090b10 !important;
     }
     .main, [data-testid="stMain"], [data-testid="stMainBlockContainer"],
     [data-testid="stVerticalBlock"], .element-container {
@@ -198,6 +203,7 @@ def _inject_full_bleed_styles() -> None:
         padding: 0 !important;
         gap: 0 !important;
         overflow: hidden !important;
+        background: #090b10 !important;
     }
     [data-testid="stHeader"] { display: none !important; height: 0 !important; }
     [data-testid="stToolbar"] { display: none !important; }
@@ -232,11 +238,79 @@ def _inject_full_bleed_styles() -> None:
         padding: 0 !important;
         margin: 0 !important;
     }
+    #hd-boot-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+            radial-gradient(circle at 50% 45%, rgba(30, 41, 59, 0.35), rgba(9, 11, 16, 0.96)),
+            #090b10;
+        transition: opacity 0.3s ease, visibility 0.3s ease;
+        opacity: 1;
+        visibility: visible;
+        animation: hdBootFailSafeHide 0s linear 14s forwards;
+    }
+    #hd-boot-overlay.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
+    .hd-boot-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+    }
+    .hd-boot-ring {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-top-color: #f97316;
+        animation: hdBootSpin 0.9s linear infinite;
+    }
+    .hd-boot-label {
+        font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #9ca3af;
+    }
+    @keyframes hdBootSpin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    @keyframes hdBootFailSafeHide {
+        to {
+            opacity: 0;
+            visibility: hidden;
+        }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .hd-boot-ring { animation: none; }
+    }
 </style>
 """,
         unsafe_allow_html=True,
     )
     st.markdown("<style>html, body {overflow:hidden !important;}</style>", unsafe_allow_html=True)
+
+
+def _render_boot_overlay() -> None:
+    st.markdown(
+        """
+<div id="hd-boot-overlay" role="status" aria-live="polite" aria-label="Loading">
+  <div class="hd-boot-inner">
+    <div class="hd-boot-ring" aria-hidden="true"></div>
+    <div class="hd-boot-label">Loading HEALTHDESERT</div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_global_landing() -> None:
@@ -275,9 +349,10 @@ def main() -> None:
 
     route = _resolve_app_route()
     _init_session_state()
+    _inject_full_bleed_styles()
+    _render_boot_overlay()
 
     if route == "global":
-        _inject_full_bleed_styles()
         _render_global_landing()
         return
 
@@ -308,7 +383,6 @@ def main() -> None:
     if st.session_state.get("hd_year") is None:
         st.session_state["hd_year"] = latest_year(geo_df)
 
-    _inject_full_bleed_styles()
     render_embedded_app(geo_df, shap_df, st.session_state)
     show_system_status(
         data_last_updated=geo_df.attrs.get("data_last_updated"),

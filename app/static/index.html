@@ -488,6 +488,38 @@ const COUNTRY_META = {
   [CANADA_ID]:  { name: 'Canada',       status: 'soon',    card: 'card-ca', color: '#38bdf8' },
 };
 
+function hideBootOverlay() {
+  const dismissFromDocument = (doc) => {
+    if (!doc) return false;
+    const overlay = doc.getElementById('hd-boot-overlay');
+    if (!overlay) return false;
+    overlay.classList.add('is-hidden');
+    window.setTimeout(() => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, 320);
+    return true;
+  };
+
+  let dismissed = false;
+  try {
+    if (window.parent && window.parent !== window) {
+      dismissed = dismissFromDocument(window.parent.document);
+    }
+  } catch (err) {
+    // Cross-origin iframe restrictions: ignore and try local document.
+  }
+  if (!dismissed) dismissFromDocument(document);
+}
+
+function scheduleBootOverlayHide(delayMs = 0) {
+  window.setTimeout(() => {
+    window.requestAnimationFrame(() => hideBootOverlay());
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+// Safety fallback: never leave the loading veil hanging forever.
+scheduleBootOverlayHide(6000);
+
 function resolveNigeriaRoute() {
   let host = '';
   let inEmbeddedParent = false;
@@ -723,10 +755,12 @@ fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
     // Start rotation
     startRotation();
     animatePulseRings();
+    scheduleBootOverlayHide(220);
   })
   .catch(err => {
     console.error('Failed to load world data:', err);
     document.getElementById('globe-svg').classList.add('loaded');
+    scheduleBootOverlayHide(220);
   });
 
 // ── Markers ────────────────────────────────────────────────────────
