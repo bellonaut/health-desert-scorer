@@ -489,9 +489,25 @@ const COUNTRY_META = {
 };
 
 function resolveNigeriaRoute() {
-  const host = (window.location.hostname || '').toLowerCase();
-  const isStreamlitHost = host.endsWith('streamlit.app');
-  return isStreamlitHost ? '/?app=ng' : '/ng';
+  let host = '';
+  let inEmbeddedParent = false;
+
+  try {
+    if (window.parent && window.parent !== window) {
+      inEmbeddedParent = true;
+      host = (window.parent.location.hostname || '').toLowerCase();
+    }
+  } catch (err) {
+    // Cross-origin access can fail; fall back to current window host.
+  }
+
+  if (!host) {
+    host = (window.location.hostname || '').toLowerCase();
+  }
+
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  const isStreamlitHost = host.endsWith('streamlit.app') || isLocalHost;
+  return (inEmbeddedParent || isStreamlitHost) ? '/?app=ng' : '/ng';
 }
 
 function wireNigeriaLink() {
