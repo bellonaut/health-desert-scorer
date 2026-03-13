@@ -2,6 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added DHS 2024 as a third year across feature generation, silver outputs, gold outputs, and app year selectors.
+- Added mock 2024 DHS KR and HR CSV fallbacks for local bootstrap workflows in `scripts/create_mock_dhs.py`.
+- Added versioned model artifact output support for `models/risk_model_v1.3/`.
+- Added routed travel-time coverage support across the pipeline, including `pop_pct_30min`, `pop_pct_60min`, `pop_pct_120min`, `pop_pct_within_60min`, and `pop_covered_60min`.
+- Added `60-min coverage` as an application focus option, detail metric, and export field.
+- Added confidence capping and confidence-band presentation in the application payload and UI.
+
+### Changed
+- Updated gold scoring to use model version `v1.3`.
+- Updated training to use all three DHS years with temporal validation holding out 2024.
+- Updated year selectors to `2024`, `2018`, `2013`, and `Both (avg)`.
+- Updated `Both` aggregation so the displayed year remains `Both` rather than a numeric average.
+- Updated footer metadata to reference DHS 2013/2018/2024 and ORS isochrones.
+- Simplified the desktop header and upgraded the comparison modal for policy-facing review workflows.
+
+### Fixed
+- Fixed DHS household recode alias handling for real HR inputs.
+- Fixed model serialization so `src.models.score.score_lga(..., version=\"v1.3\")` resolves correctly.
+- Fixed confidence display so hotspot and detail payloads no longer expose raw over-precise percentages.
+
+### Verification
+- `python -m src.data.build_features`
+- `python -m src.data.migrate_release_data`
+- `python -m src.data.build_silver`
+- `python -m src.data.build_gold`
+- `python -m src.data.validate_gold_contracts`
+- `pytest -q`
+- `node tests/accessibility_test.js`
+- `streamlit run app/app.py --server.headless true`
+
 ## [1.3.1] - 2026-02-18
 
 ### Fixed

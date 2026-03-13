@@ -75,6 +75,14 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _cap_confidence(value: Any, cap: float = 90.0) -> float | None:
+    """Mirror of data_api._cap_confidence. Cap confidence to honest band."""
+    n = _safe_float(value)
+    if n is None:
+        return None
+    return min(n, cap)
+
+
 def _year_key(value: Any) -> int | str | None:
     if value is None:
         return None
@@ -206,10 +214,11 @@ def _records_from_geo(
             "u5mr": _safe_float(getattr(row, "u5mr_mean", None)),
             "pop": _safe_float(getattr(row, "population", None)),
             "cov": _safe_float(getattr(row, "coverage_5km", None)),
+            "pop_pct_60min": _safe_float(getattr(row, "pop_pct_60min", None)),
             "towers": _safe_float(getattr(row, "towers_per_10k", None)),
             "density": _safe_float(getattr(row, "population_density", None)),
             "year": year_value,
-            "confidence_pct": _safe_float(getattr(row, "confidence_pct", None)),
+            "confidence_pct": _cap_confidence(getattr(row, "confidence_pct", None)),
             "confidence_reason_codes": _coerce(getattr(row, "confidence_reason_codes", None)),
             "primary_barriers": _coerce(getattr(row, "primary_barriers", None)),
             "recommendation": _coerce(getattr(row, "recommendation", None)),

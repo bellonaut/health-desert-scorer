@@ -10,6 +10,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLD_DIR = ROOT / "data" / "gold"
+EXPECTED_YEARS = {2013, 2018, 2024}
+MIN_ROWS_PER_YEAR = 500
 
 
 RISK_REQUIRED = {
@@ -70,6 +72,25 @@ def main() -> None:
         raise AssertionError("lga_id/year combinations must be unique")
     if risk["risk_score_total"].isna().any():
         raise AssertionError("risk_score_total cannot be null")
+    observed_years = set(pd.to_numeric(risk["year"], errors="coerce").dropna().astype(int).unique().tolist())
+    if observed_years != EXPECTED_YEARS:
+        raise AssertionError(f"gold_lga_risk.csv must contain years {sorted(EXPECTED_YEARS)}; found {sorted(observed_years)}")
+    counts_by_year = risk.groupby("year").size()
+    bad_years = counts_by_year[counts_by_year < MIN_ROWS_PER_YEAR]
+    if not bad_years.empty:
+        raise AssertionError(f"Each year must have at least {MIN_ROWS_PER_YEAR} rows. Found {bad_years.to_dict()}")
+    # Travel time: if present, validate range
+    if "pop_pct_60min" in risk.columns:
+        valid_tt = risk["pop_pct_60min"].dropna()
+        if len(valid_tt) > 0:
+            if not valid_tt.between(0, 100).all():
+                raise AssertionError("pop_pct_60min must be in [0, 100]")
+            coverage_pct = risk["pop_pct_60min"].notna().mean()
+            print(f"Travel time coverage: {coverage_pct:.0%} of LGAs have pop_pct_60min")
+        else:
+            print("Travel time: pop_pct_60min column present but all null (run generate_travel_time.py)")
+    else:
+        print("Travel time: pop_pct_60min not yet in gold (run generate_travel_time.py)")
 
     explain = pd.read_csv(explain_path)
     _require_cols(explain, EXPLAIN_REQUIRED, "gold_lga_explain")

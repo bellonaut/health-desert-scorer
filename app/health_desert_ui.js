@@ -32,6 +32,7 @@ const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [
 const allLgasForSearch = Array.isArray(injected.all_lgas_for_search) ? injected.all_lgas_for_search : [];
 const stateOptions = ['All Nigeria', ...(injected.states || [])];
 const urlParams = new URLSearchParams(window.parent.location.search);
+const hasExplicitYearParam = urlParams.has('year');
 const testingMode = ['1', 'true', 'yes'].includes((urlParams.get('testing') || '').toLowerCase());
 const testPersona = urlParams.get('persona') || 'unknown';
 let testSession = urlParams.get('session') || '';
@@ -48,6 +49,18 @@ let currentYear = meta.year != null ? String(meta.year) : '2018';
 let currentLayer = 'Risk score';
 let isMobile = document.documentElement.getAttribute('data-mobile') === '1';
 let pendingEvent = null;
+let bootstrappingLatestYear = false;
+
+if (!hasExplicitYearParam && currentYear !== '2024') {
+  try {
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('year', '2024');
+    bootstrappingLatestYear = true;
+    window.parent.location.replace(url.toString());
+  } catch (e) {
+    // Ignore cross-origin or history access issues and continue with injected state.
+  }
+}
 
 const lgaById = new Map(lgas.map((l) => [String(l.id), l]));
 const featureLayerById = new Map();
@@ -150,10 +163,22 @@ function riskLabel(r, total) {
 
 function confidenceBadge(conf) {
   const n = safeNum(conf);
-  if (n == null) return { emoji: '🟡', label: 'Unknown' };
-  if (n >= 80) return { emoji: '🟢', label: `${n.toFixed(0)}%` };
-  if (n >= 60) return { emoji: '🟡', label: `${n.toFixed(0)}%` };
-  return { emoji: '🔴', label: `${n.toFixed(0)}%` };
+  if (n == null) return {
+    emoji: '🟡', label: 'Unknown',
+    title: 'Confidence could not be estimated for this LGA.'
+  };
+  if (n >= 85) return {
+    emoji: '🟢', label: '>85%',
+    title: 'Relatively complete data. Some gaps remain — always validate locally.'
+  };
+  if (n >= 65) return {
+    emoji: '🟡', label: '65–85%',
+    title: 'Moderate data gaps may affect this estimate. Use with field verification.'
+  };
+  return {
+    emoji: '🔴', label: '<65%',
+    title: 'Significant data gaps — treat this score with extra caution.'
+  };
 }
 
 function fmtMetric(v) {
@@ -246,7 +271,7 @@ function syncHeader() {
   if (footnote) {
     const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version;
     const updated = meta.data_last_updated ? `Updated ${meta.data_last_updated}` : 'Update date unknown';
-    footnote.textContent = `DHS 2013/2018 · NHFR · OpenCellID · Model ${modelVersion || 'v1.2'} · ${updated}`;
+    footnote.textContent = `DHS 2013/2018/2024 · NHFR · ORS isochrones · OpenCellID · Model ${modelVersion || 'v1.3'} · ${updated}`;
   }
 
   const resNote = document.querySelector('.res-note');
@@ -355,14 +380,16 @@ const FOCUS_COLUMNS = {
   'Child mortality': 'u5mr',
   'Facility access': 'fac',
   'Connectivity': 'towers',
-  '5km coverage': 'cov'
+  '5km coverage': 'cov',
+  '60-min coverage': 'pop_pct_60min'
 };
 
 // Columns where higher values are better (ascending sort)
 const ASCENDING_FOCUS = {
   'fac': true,
   'towers': true,
-  'cov': true
+  'cov': true,
+  'pop_pct_60min': true
 };
 
 function hotspotsBase() {
@@ -459,11 +486,6 @@ function renderHotspots() {
     const scoreWrap = document.createElement('div');
     scoreWrap.className = 'hotspot-score';
 
-    const conf = confidenceBadge(lga.confidence_pct);
-    const confEl = document.createElement('div');
-    confEl.className = 'hotspot-state';
-    confEl.textContent = `${conf.emoji} ${conf.label}`;
-
     const badge = document.createElement('div');
     const risk = safeNum(lga.risk);
     const riskTotal = safeNum(lga.risk_total);
@@ -472,7 +494,7 @@ function renderHotspots() {
     badge.className = `risk-badge ${bucket}`;
     badge.textContent = riskLabel(risk, riskTotal);
 
-    scoreWrap.append(confEl, badge);
+    scoreWrap.append(badge);
     card.append(rank, info, scoreWrap);
     card.addEventListener('click', () => selectLGA(lga.id));
     list.appendChild(card);
@@ -811,7 +833,7 @@ function renderDetail() {
           <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum, riskTotal))}</span>
           ${isResearch ? '<span class="research-mode-tag">RESEARCH</span>' : ''}
         </div>
-        <div class="detail-state-tag">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)}</div>
+        <div class="detail-state-tag" title="${escapeHtml(conf.title || '')}">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)} <span class="conf-band-note">(estimated band)</span></div>
       </div>
       <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close">&times;</button>
     </div>
@@ -838,6 +860,11 @@ function renderDetail() {
         <div class="metric-label">5km coverage</div>
         <div class="metric-value ${metricClass(lga.cov, 20, 50)}">${escapeHtml(fmtMetric(lga.cov))}</div>
         <div class="metric-unit">area within 5km</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">60-min coverage</div>
+        <div class="metric-value ${metricClass(lga.pop_pct_60min, 30, 60)}">${escapeHtml(fmtMetric(lga.pop_pct_60min))}</div>
+        <div class="metric-unit">% pop within 60min drive</div>
       </div>
     </div>
 
@@ -963,85 +990,117 @@ function renderCompareSlots() {
 
 function runCompare() {
   if (compareLGAs.length < 2) {
-    alert('Please add at least 2 LGAs to compare');
+    alert('Please add at least 2 LGAs to compare.');
     return;
   }
-  
-  // Build comparison table HTML
+
   const metrics = [
-    { key: 'risk', label: 'Risk Score', format: (v) => riskLabel(v) },
-    { key: 'fac', label: 'Facilities / 10k', format: (v) => fmtMetric(v) },
-    { key: 'dist', label: 'Avg Distance (km)', format: (v) => fmtMetric(v) },
-    { key: 'u5mr', label: 'U5 Mortality Rate', format: (v) => fmtMetric(v) },
-    { key: 'cov', label: '5km Coverage %', format: (v) => fmtMetric(v) },
-    { key: 'towers', label: 'Towers / 10k', format: (v) => fmtMetric(v) },
+    { key: 'year',       label: 'Year',               higherIsBad: null,  format: (v) => v != null ? String(v) : '—' },
+    { key: 'risk_total', label: 'Risk score (0–10)',   higherIsBad: true,  format: (v) => v != null ? Number(v).toFixed(1) : '—' },
+    { key: 'fac',        label: 'Facilities / 10k',    higherIsBad: false, format: fmtMetric },
+    { key: 'dist',       label: 'Avg distance (km)',   higherIsBad: true,  format: fmtMetric },
+    { key: 'u5mr',       label: 'Under-5 mortality',   higherIsBad: true,  format: fmtMetric },
+    { key: 'cov',        label: '5km coverage %',      higherIsBad: false, format: fmtMetric },
+    { key: 'towers',     label: 'Towers / 10k',        higherIsBad: false, format: fmtMetric },
   ];
-  
-  let tableHtml = `
-    <div class="compare-overlay" id="compare-overlay">
+
+  function cellStyle(rawValues, idx, higherIsBad) {
+    if (higherIsBad === null) return '';
+    const nums = rawValues.map((v) => safeNum(v)).filter((v) => v != null);
+    if (nums.length < 2) return '';
+    const val = safeNum(rawValues[idx]);
+    if (val == null) return '';
+    const best = higherIsBad ? Math.min(...nums) : Math.max(...nums);
+    const worst = higherIsBad ? Math.max(...nums) : Math.min(...nums);
+    if (val === best) return ' style="background:rgba(34,197,94,0.13);color:#4ade80;font-weight:600"';
+    if (val === worst) return ' style="background:rgba(239,68,68,0.11);color:#f87171"';
+    return '';
+  }
+
+  const confBands = compareLGAs.map((l) => {
+    const c = confidenceBadge(l.confidence_pct);
+    return `${c.emoji} ${c.label}`;
+  });
+
+  const headerCells = compareLGAs
+    .map((l) => `<th>${escapeHtml(sanitizeText(l.name, 'LGA'))}<br><span class="compare-state-tag">${escapeHtml(sanitizeText(l.state, ''))}</span></th>`)
+    .join('');
+
+  const confRow = `
+    <tr>
+      <td class="metric-name">Data confidence</td>
+      ${confBands.map((b) => `<td class="metric-val">${escapeHtml(b)}</td>`).join('')}
+    </tr>`;
+
+  const metricRows = metrics.map((metric) => {
+    const rawValues = compareLGAs.map((l) =>
+      metric.key === 'year' ? l.year : safeNum(l[metric.key])
+    );
+    const cells = rawValues.map((val, idx) => {
+      const style = cellStyle(rawValues, idx, metric.higherIsBad);
+      return `<td class="metric-val"${style}>${escapeHtml(metric.format(val))}</td>`;
+    }).join('');
+    return `<tr><td class="metric-name">${escapeHtml(metric.label)}</td>${cells}</tr>`;
+  }).join('');
+
+  const html = `
+    <div class="compare-overlay" id="compare-overlay" role="dialog" aria-modal="true" aria-label="LGA comparison">
       <div class="compare-modal">
         <div class="compare-header">
-          <h2>Compare LGAs</h2>
+          <h2 class="compare-title">LGA Comparison</h2>
           <button type="button" class="close-btn" id="compare-close-btn" aria-label="Close comparison">×</button>
+        </div>
+        <div class="compare-legend-note">
+          <span style="color:#4ade80">■</span> Best on metric &nbsp;
+          <span style="color:#f87171">■</span> Worst on metric &nbsp;
+          <span style="opacity:0.5">■</span> Mid / no data
         </div>
         <div class="compare-body">
           <table class="compare-table">
-            <thead>
-              <tr>
-                <th>Metric</th>
-                ${compareLGAs.map(l => `<th>${escapeHtml(sanitizeText(l.name, 'LGA'))}</th>`).join('')}
-              </tr>
-            </thead>
-            <tbody>
-  `;
-  
-  metrics.forEach(metric => {
-    tableHtml += `<tr><td class="metric-name">${metric.label}</td>`;
-    compareLGAs.forEach(lga => {
-      const val = safeNum(lga[metric.key]);
-      tableHtml += `<td class="metric-val">${metric.format(val)}</td>`;
-    });
-    tableHtml += '</tr>';
-  });
-  
-  tableHtml += `
-            </tbody>
+            <thead><tr><th>Metric</th>${headerCells}</tr></thead>
+            <tbody>${confRow}${metricRows}</tbody>
           </table>
         </div>
+        <p class="compare-disclaimer">
+          Decision-support only. Scores reflect data availability and modelling assumptions, not ground truth.
+          Always combine with local field knowledge before planning decisions.
+        </p>
         <div class="compare-footer">
-          <button type="button" class="dl-btn" id="compare-download-btn">Download Comparison (CSV)</button>
+          <button type="button" class="dl-btn" id="compare-download-btn">Download CSV</button>
         </div>
       </div>
     </div>
   `;
-  
-  // Remove existing overlay if any
+
   const existing = document.getElementById('compare-overlay');
   if (existing) existing.remove();
-  
-  // Add overlay to body
-  document.body.insertAdjacentHTML('beforeend', tableHtml);
-  
-  // Wire up close button
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
   document.getElementById('compare-close-btn')?.addEventListener('click', () => {
     document.getElementById('compare-overlay')?.remove();
   });
-  
-  // Wire up download button
+
   document.getElementById('compare-download-btn')?.addEventListener('click', () => {
-    const headers = ['Metric', ...compareLGAs.map(l => sanitizeText(l.name, 'LGA'))];
-    const rows = metrics.map(metric => {
-      return [metric.label, ...compareLGAs.map(lga => metric.format(safeNum(lga[metric.key])))];
-    });
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const allRows = [
+      ['Metric', ...compareLGAs.map((l) => sanitizeText(l.name, 'LGA'))],
+      ['Data confidence', ...confBands],
+      ...metrics.map((metric) => [
+        metric.label,
+        ...compareLGAs.map((l) => {
+          const val = metric.key === 'year' ? l.year : safeNum(l[metric.key]);
+          return metric.format(val);
+        }),
+      ]),
+    ];
+    const csv = allRows.map((r) => r.map(csvSafe).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'lga_comparison.csv';
+    a.download = `lga_comparison_${currentState}_${currentYear}.csv`;
     a.click();
   });
-  
-  // Open the overlay
+
   openOverlay('compare-overlay');
 }
 
@@ -1357,7 +1416,7 @@ function buildExportMetadata() {
     '# This is a planning tool output. Scores indicate access barriers, not health outcomes.',
     '# Always validate with local knowledge before decisions.',
     '#',
-    '# Data Sources: DHS 2013, 2018 · NHFR 2020 · WorldPop 2020 · OpenCellID 2019',
+    '# Data Sources: DHS 2013, 2018, 2024 · NHFR 2020 · WorldPop 2024 · ORS isochrones · OpenCellID 2019',
     `# Model: ${modelVersion}`,
     `# Data last updated: ${updated}`,
     '# Citation: Bello, B.A. (2026). Health Desert Scorer.',
@@ -1376,6 +1435,7 @@ function exportFieldDefs() {
     { key: 'dist', label: 'avg_distance_km' },
     { key: 'u5mr', label: 'u5mr_mean' },
     { key: 'cov', label: 'coverage_5km' },
+    { key: 'pop_pct_60min', label: 'pop_pct_within_60min_drive' },
     { key: 'towers', label: 'towers_per_10k' },
     { key: 'confidence_pct', label: 'confidence_pct' },
     { key: 'confidence_reason_codes', label: 'confidence_reason_codes' },
@@ -1784,6 +1844,10 @@ function wireEvents() {
     syncMobileMoreMeta();
     openOverlay('mobile-more-drawer');
   });
+  document.getElementById('desktop-more-btn')?.addEventListener('click', () => {
+    syncMobileMoreMeta();
+    openOverlay('mobile-more-drawer');
+  });
   document.getElementById('mobile-more-close-btn')?.addEventListener('click', () => closeOverlay('mobile-more-drawer'));
   document.getElementById('mobile-more-tour-btn')?.addEventListener('click', () => {
     closeOverlay('mobile-more-drawer');
@@ -1832,25 +1896,27 @@ function wireEvents() {
   initBottomSheetDrag();
 }
 
-wireEvents();
-detectMobile();
-window.addEventListener('resize', detectMobile);
-if (testingMode && testSession) {
-  pushStateToPython({ immediate: true });
-}
-syncHeader();
-applyDepthVisibility();
-renderHotspots();
-renderCompareSlots();
-renderMap();
-maybeStartTour();
+if (!bootstrappingLatestYear) {
+  wireEvents();
+  detectMobile();
+  window.addEventListener('resize', detectMobile);
+  if (testingMode && testSession) {
+    pushStateToPython({ immediate: true });
+  }
+  syncHeader();
+  applyDepthVisibility();
+  renderHotspots();
+  renderCompareSlots();
+  renderMap();
+  maybeStartTour();
 
-if (selectedLGA) {
-  openDrawer();
-  renderDetail();
-}
+  if (selectedLGA) {
+    openDrawer();
+    renderDetail();
+  }
 
-scheduleBootOverlayHide(80);
+  scheduleBootOverlayHide(80);
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;

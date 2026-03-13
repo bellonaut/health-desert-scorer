@@ -84,6 +84,7 @@ def build_silver_metrics() -> pd.DataFrame:
     features["coverage_4g_pct"] = pd.NA
     features["data_quality_flag"] = "ok"
     features.loc[features["facilities_per_10k"].fillna(0) <= 0, "data_quality_flag"] = "no_facilities"
+    # pop_pct_60min and pop_pct_within_60min pass through from features if present
     features.to_csv(SILVER / "lga_metrics.csv", index=False)
     return features
 

@@ -1718,3 +1718,34 @@ header {
 [data-mobile="1"] .main { flex-direction: column; }
 
 
+/* Confidence band note in detail drawer */
+.conf-band-note {
+  font-size: 0.65em;
+  opacity: 0.5;
+  font-style: italic;
+  margin-left: 2px;
+}
+
+/* Comparison modal additions */
+.compare-legend-note {
+  font-size: 0.72em;
+  opacity: 0.7;
+  padding: 6px 20px 0;
+  font-family: var(--font-mono, monospace);
+}
+.compare-state-tag {
+  font-size: 0.75em;
+  opacity: 0.6;
+  font-weight: 400;
+}
+.compare-title {
+  font-size: 1.1em;
+  margin: 0;
+}
+.compare-disclaimer {
+  font-size: 0.72em;
+  opacity: 0.55;
+  padding: 8px 20px;
+  margin: 0;
+  line-height: 1.5;
+}

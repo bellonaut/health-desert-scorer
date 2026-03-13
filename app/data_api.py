@@ -29,9 +29,10 @@ FOCUS_COLUMN = {
     "Facility access": "facilities_per_10k",
     "Connectivity": "towers_per_10k",
     "5km coverage": "coverage_5km",
+    "60-min coverage": "pop_pct_60min",
 }
 
-ASCENDING_FOCUS = {"facilities_per_10k", "towers_per_10k", "coverage_5km"}
+ASCENDING_FOCUS = {"facilities_per_10k", "towers_per_10k", "coverage_5km", "pop_pct_60min"}
 
 # Optional softening for over-confident probabilities; env var lets us tune without code changes
 RISK_TEMPERATURE = float(os.getenv("RISK_TEMPERATURE", "2.0"))
@@ -50,6 +51,9 @@ EXPECTED_COLUMNS = [
     "population_density",
     "towers_per_10k",
     "coverage_5km",
+    "pop_pct_30min",
+    "pop_pct_60min",
+    "pop_pct_within_60min",
     "shap_importance",
     "year",
     "confidence_pct",
@@ -337,15 +341,19 @@ def _filter_year(df: pd.DataFrame, year: int | None) -> pd.DataFrame:
 
 
 def _collapse_years(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate across years by averaging numeric columns, keeping first geometry + labels."""
+    """Aggregate across available DHS years, averaging numeric columns across 2013/2018/2024 and keeping first geometry + labels."""
     if df.empty:
         return df
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    numeric_cols = [col for col in df.select_dtypes(include="number").columns.tolist() if col != "year"]
     keep_first = [col for col in df.columns if col not in numeric_cols]
     agg = {col: "mean" for col in numeric_cols}
     for col in keep_first:
         agg[col] = "first"
     collapsed = df.groupby("lga_uid", as_index=False).agg(agg)
+    if "year" in collapsed.columns:
+        collapsed["year"] = "Both"
+    if "geometry" in collapsed.columns:
+        return gpd.GeoDataFrame(collapsed, geometry="geometry", crs=getattr(df, "crs", None))
     return collapsed
 
 
@@ -400,6 +408,19 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _cap_confidence(value: Any, cap: float = 90.0) -> float | None:
+    """Cap confidence_pct to avoid false precision near 100%.
+
+    Gold pipeline synthetic confidence values can reach 100%.
+    No LGA-level estimate from DHS 2013/2018/2024 warrants that.
+    Cap at 90 until pipeline emits calibrated values.
+    """
+    n = _safe_float(value)
+    if n is None:
+        return None
+    return min(n, cap)
+
+
 def get_ranked_hotspots(
     geo_df: pd.DataFrame,
     focus: str,
@@ -429,9 +450,10 @@ def get_ranked_hotspots(
                 "u5mr": _safe_float(row.get("u5mr_mean")),
                 "pop": _safe_float(row.get("population")),
                 "cov": _safe_float(row.get("coverage_5km")),
+                "pop_pct_60min": _safe_float(row.get("pop_pct_60min")),
                 "towers": _safe_float(row.get("towers_per_10k")),
                 "year": row.get("year"),
-                "confidence_pct": _safe_float(row.get("confidence_pct")),
+                "confidence_pct": _cap_confidence(row.get("confidence_pct")),
                 "confidence_reason_codes": row.get("confidence_reason_codes"),
                 "primary_barriers": row.get("primary_barriers"),
                 "recommendation": row.get("recommendation"),
@@ -463,10 +485,11 @@ def get_lga_detail(
         "u5mr": _safe_float(row.get("u5mr_mean")),
         "pop": _safe_float(row.get("population")),
         "cov": _safe_float(row.get("coverage_5km")),
+        "pop_pct_60min": _safe_float(row.get("pop_pct_60min")),
         "towers": _safe_float(row.get("towers_per_10k")),
         "density": _safe_float(row.get("population_density")),
         "year": row.get("year"),
-        "confidence_pct": _safe_float(row.get("confidence_pct")),
+        "confidence_pct": _cap_confidence(row.get("confidence_pct")),
         "confidence_reason_codes": row.get("confidence_reason_codes"),
         "primary_barriers": row.get("primary_barriers"),
         "recommendation": row.get("recommendation"),
