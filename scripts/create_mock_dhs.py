@@ -139,10 +139,108 @@ def create_mock_clusters(output_path: Path, n_clusters: int = 1200, seed: int = 
     return df
 
 
+def _survey_cmc(year: int) -> int:
+    """Approximate DHS century-month code for the survey year."""
+
+    month = 7
+    return (year - 1900) * 12 + month
+
+
+def create_mock_recode_files(
+    clusters_df: pd.DataFrame,
+    *,
+    year: int,
+    kr_output_path: Path,
+    hr_output_path: Path,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Create KR/HR-style CSV fallbacks for CI/demo runs when real DHS files are absent."""
+
+    rng = np.random.default_rng(seed + year)
+    base = clusters_df.copy()
+    base["state_code"] = ((base["cluster_id"] - 1) % 37) + 1
+    base["urban_rural"] = np.where(base["urban"].astype(float) >= 0.5, 1, 2)
+    base["sample_weight"] = rng.integers(250_000, 2_500_000, size=len(base))
+
+    interview_cmc = _survey_cmc(year)
+
+    kr_rows: list[dict[str, float | int]] = []
+    hr_rows: list[dict[str, float | int]] = []
+
+    for row in base.itertuples(index=False):
+        n_children = int(rng.integers(18, 42))
+        n_households = int(rng.integers(16, 36))
+        household_ids = rng.integers(1, max(8, n_households) + 1, size=n_children)
+
+        death_prob = min(max(float(row.u5mr) / 1000.0, 0.01), 0.25)
+        ages_at_interview = rng.integers(0, 60, size=n_children)
+        child_dead = rng.binomial(1, death_prob, size=n_children)
+
+        for idx in range(n_children):
+            age_months = int(ages_at_interview[idx])
+            birth_cmc = interview_cmc - age_months
+            died = bool(child_dead[idx])
+            if died and age_months > 0:
+                age_at_death = int(rng.integers(0, age_months + 1))
+            elif died:
+                age_at_death = 0
+            else:
+                age_at_death = np.nan
+
+            kr_rows.append(
+                {
+                    "v001": int(row.cluster_id),
+                    "v002": int(household_ids[idx]),
+                    "v005": int(row.sample_weight),
+                    "v008": int(interview_cmc),
+                    "b3": int(birth_cmc),
+                    "v024": int(row.state_code),
+                    "v025": int(row.urban_rural),
+                    "b5": 0 if died else 1,
+                    "b7": age_at_death,
+                    "year": year,
+                }
+            )
+
+        for household_id in range(1, n_households + 1):
+            hr_rows.append(
+                {
+                    "hv001": int(row.cluster_id),
+                    "hv002": int(household_id),
+                    "hv005": int(row.sample_weight),
+                    "hv024": int(row.state_code),
+                    "hv025": int(row.urban_rural),
+                    "hv270": int(rng.integers(1, 6)),
+                    "hv201": int(rng.integers(11, 97)),
+                    "hv205": int(rng.integers(11, 97)),
+                    "year": year,
+                }
+            )
+
+    kr_df = pd.DataFrame(kr_rows)
+    hr_df = pd.DataFrame(hr_rows)
+
+    kr_output_path.parent.mkdir(parents=True, exist_ok=True)
+    hr_output_path.parent.mkdir(parents=True, exist_ok=True)
+    kr_df.to_csv(kr_output_path, index=False)
+    hr_df.to_csv(hr_output_path, index=False)
+
+    logging.info("Created mock KR file for %s at %s", year, kr_output_path)
+    logging.info("Created mock HR file for %s at %s", year, hr_output_path)
+    print(f"OK: mock DHS {year} KR rows={len(kr_df)} HR rows={len(hr_df)}")
+    return kr_df, hr_df
+
+
 def main() -> None:
     configure_logging()
     output_path = Path("data/raw/mock_dhs_clusters.csv")
-    create_mock_clusters(output_path)
+    clusters_df = create_mock_clusters(output_path)
+    create_mock_recode_files(
+        clusters_df,
+        year=2024,
+        kr_output_path=Path("data/raw/dhs/2024/NGKR8BDT/NGKR8BDT.csv"),
+        hr_output_path=Path("data/raw/dhs/2024/NGHR8BDT/NGHR8BDT.csv"),
+    )
 
 
 if __name__ == "__main__":

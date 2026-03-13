@@ -36,20 +36,13 @@
       <span class="pill-dot"></span>
       <span class="icon meta-icon">YEAR</span>
       <select id="year-select" class="year-select" aria-label="Select year">
-        <option value="2013">2013</option>
+        <option value="2024">2024</option>
         <option value="2018">2018</option>
-        <option value="Both">Both</option>
+        <option value="2013">2013</option>
+        <option value="Both">Both (avg)</option>
       </select>
     </div>
 
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <a href="/Methodology" target="_blank" rel="noopener noreferrer" class="meta-link" id="methodology-link">📊 Methodology</a>
-    </div>
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <a href="/Glossary" target="_blank" rel="noopener noreferrer" class="meta-link" id="glossary-link">📖 Glossary</a>
-    </div>
     <div class="state-pill">
       <span class="pill-dot"></span>
       <button type="button" class="meta-link-btn" id="share-open-btn">Share</button>
@@ -60,12 +53,12 @@
     </div>
     <div class="state-pill">
       <span class="pill-dot"></span>
-      <button type="button" class="meta-link-btn" id="tour-restart-btn">Tour</button>
+      <button type="button" class="meta-link-btn" id="desktop-more-btn" aria-label="More options">&#8942; More</button>
     </div>
   </div>
 
   <div id="dataset-meta" class="dataset-meta">
-    <span id="dataset-meta-text">774 LGAs · 2013</span>
+    <span id="dataset-meta-text">774 LGAs · 2024</span>
     <span id="apply-status" class="status-pill"><span class="status-dot"></span>Ready</span>
   </div>
 
@@ -95,6 +88,7 @@
         <button type="button" class="chip" data-focus="Facility access" aria-pressed="false">Facility access</button>
         <button type="button" class="chip" data-focus="Connectivity" aria-pressed="false">Connectivity</button>
         <button type="button" class="chip" data-focus="5km coverage" aria-pressed="false">5km coverage</button>
+        <button type="button" class="chip" data-focus="60-min coverage" aria-pressed="false">60-min coverage</button>
       </div>
 
       <div class="section-label">Highest-need list · <span id="focus-scope">Nigeria</span> <span class="help-icon" data-help="Ranked by the selected focus. This highlights access barriers, not blame.">?</span></div>
@@ -136,9 +130,10 @@
       <div class="map-filter-pill">
         <span class="pill-dot"></span>
         <select id="year-select-mobile" class="year-select" aria-label="Select year">
-          <option value="2013">2013</option>
+          <option value="2024">2024</option>
           <option value="2018">2018</option>
-          <option value="Both">Both</option>
+          <option value="2013">2013</option>
+          <option value="Both">Both (avg)</option>
         </select>
       </div>
     </div>
@@ -164,7 +159,7 @@
     <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
     <div class="map-credit">made by bashir aminu bello 2026</div>
 
-    <div class="data-footnote" id="data-footnote">DHS 2013/2018 · NHFR · OpenCellID · Model v1.2</div>
+    <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 · NHFR · ORS isochrones · OpenCellID · Model v1.3</div>
   </div>
 </div>
 

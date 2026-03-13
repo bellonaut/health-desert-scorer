@@ -8,6 +8,7 @@ joblib==1.4.2
 matplotlib==3.10.8
 numpy==2.1.1
 pandas==2.3.0
+pyreadstat
 pydeck==0.8.1b0
 requests==2.31.0
 scikit-learn==1.8.0

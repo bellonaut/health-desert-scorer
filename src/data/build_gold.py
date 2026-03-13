@@ -14,6 +14,7 @@ from src.models.score import score_lga
 ROOT = Path(__file__).resolve().parents[2]
 SILVER = ROOT / "data" / "silver"
 GOLD = ROOT / "data" / "gold"
+MODEL_VERSION = "v1.3"
 
 
 def calculate_confidence(confidence_issues: str) -> int:
@@ -33,6 +34,11 @@ def _component_scores(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
     out["risk_score_facility_access"] = (10 - (df["facilities_per_10k"].fillna(0).clip(0, 10))).clip(0, 10)
     out["risk_score_connectivity"] = (10 - (df["coverage_5km"].fillna(0) / 10)).clip(0, 10)
+    # Use routed 60-min coverage if available, fall back to straight-line 5km coverage
+    if "pop_pct_60min" in df.columns and df["pop_pct_60min"].notna().mean() > 0.3:
+        out["risk_score_access_60min"] = (10 - (df["pop_pct_60min"].fillna(0) / 10)).clip(0, 10)
+    else:
+        out["risk_score_access_60min"] = out["risk_score_connectivity"].copy()
     out["risk_score_mortality"] = (df["u5mr_mean"].fillna(0) / 20).clip(0, 10)
     return out
 
@@ -58,6 +64,11 @@ def build_gold_lga_risk() -> pd.DataFrame:
 
     metrics = _ensure_ids(metrics)
     df = metrics.merge(quality, on=["lga_id", "year"], how="left")
+    # Carry travel time columns forward if present in silver metrics
+    _tt_cols = [c for c in ["pop_pct_30min", "pop_pct_60min", "pop_pct_within_60min"] if c in df.columns]
+    if not _tt_cols:
+        for col in ["pop_pct_30min", "pop_pct_60min", "pop_pct_within_60min"]:
+            df[col] = float("nan")
 
     feature_cols = [
         "facilities_per_10k",
@@ -69,18 +80,24 @@ def build_gold_lga_risk() -> pd.DataFrame:
     ]
 
     try:
-        model_scores = score_lga(df[feature_cols], version="v1.2")
+        model_scores = score_lga(df[feature_cols], version=MODEL_VERSION)
         df["risk_score_total"] = pd.to_numeric(model_scores["risk_score_total"], errors="coerce")
         df["model_version"] = model_scores["model_version"]
     except Exception:
         # Deterministic fallback preserves reproducibility even without a local binary artifact.
+        # Use routed 60-min coverage if available, else straight-line 5km
+        _cov = (
+            df["pop_pct_60min"].fillna(df["coverage_5km"].fillna(0))
+            if "pop_pct_60min" in df.columns
+            else df["coverage_5km"].fillna(0)
+        )
         df["risk_score_total"] = (
             (10 - df["facilities_per_10k"].fillna(0).clip(0, 10)) * 0.35
             + (df["avg_distance_km"].fillna(0).clip(0, 20) / 2) * 0.20
             + (df["u5mr_mean"].fillna(0).clip(0, 200) / 20) * 0.25
-            + (10 - (df["coverage_5km"].fillna(0).clip(0, 100) / 10)) * 0.20
+            + (10 - (_cov.clip(0, 100) / 10)) * 0.20
         )
-        df["model_version"] = "v1.2-fallback"
+        df["model_version"] = "v1.3-fallback"
 
     components = _component_scores(df)
     df = pd.concat([df, components], axis=1)
