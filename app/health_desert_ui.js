@@ -23,6 +23,53 @@
   }
 })();
 
+function getParentUrl() {
+  try {
+    if (window.parent?.location?.href) {
+      return new URL(window.parent.location.href);
+    }
+  } catch (e) {
+    // iframe parent access may be blocked by sandbox/navigation policy
+  }
+
+  try {
+    if (document.referrer) {
+      return new URL(document.referrer);
+    }
+  } catch (e) {
+    // ignore invalid or unavailable referrer values
+  }
+
+  try {
+    return new URL(window.location.href);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getParentDocument() {
+  try {
+    if (window.parent && window.parent !== window) {
+      return window.parent.document;
+    }
+  } catch (e) {
+    // ignore blocked parent DOM access
+  }
+  return null;
+}
+
+function replaceParentLocation(nextUrl) {
+  try {
+    if (window.parent?.location) {
+      window.parent.location.replace(nextUrl);
+      return true;
+    }
+  } catch (e) {
+    // ignore blocked parent navigation
+  }
+  return false;
+}
+
 // Data injected from Streamlit
 const injected = window.__INITIAL_DATA__ || {};
 const meta = injected.meta || {};
@@ -31,7 +78,43 @@ const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [
 // Use all_lgas_for_search for comprehensive search coverage
 const allLgasForSearch = Array.isArray(injected.all_lgas_for_search) ? injected.all_lgas_for_search : [];
 const stateOptions = ['All Nigeria', ...(injected.states || [])];
-const urlParams = new URLSearchParams(window.parent.location.search);
+const discoveredParentUrl = getParentUrl();
+
+function buildConfiguredParentUrl() {
+  if (!meta.parent_app_path) return null;
+
+  let baseOrigin = 'http://localhost:8501';
+  if (discoveredParentUrl?.origin) {
+    baseOrigin = discoveredParentUrl.origin;
+  } else {
+    try {
+      if (document.referrer) {
+        baseOrigin = new URL(document.referrer).origin;
+      }
+    } catch (e) {
+      // ignore referrer parse issues and keep fallback origin
+    }
+  }
+
+  try {
+    return new URL(meta.parent_app_path, `${baseOrigin}/`);
+  } catch (e) {
+    return null;
+  }
+}
+
+const configuredParentUrl = buildConfiguredParentUrl();
+
+function getAppStateBaseUrl() {
+  if (configuredParentUrl) return new URL(configuredParentUrl.toString());
+
+  const liveParent = getParentUrl();
+  if (liveParent) return new URL(liveParent.toString());
+  return null;
+}
+
+const parentUrl = getAppStateBaseUrl();
+const urlParams = parentUrl ? new URLSearchParams(parentUrl.search) : new URLSearchParams();
 const hasExplicitYearParam = urlParams.has('year');
 const testingMode = ['1', 'true', 'yes'].includes((urlParams.get('testing') || '').toLowerCase());
 const testPersona = urlParams.get('persona') || 'unknown';
@@ -47,16 +130,18 @@ if (currentDepth > 1) currentDepth = 1;
 let currentFocus = meta.focus || 'All risk';
 let currentYear = meta.year != null ? String(meta.year) : '2018';
 let currentLayer = 'Risk score';
+let currentMapMode = 'polygon';
 let isMobile = document.documentElement.getAttribute('data-mobile') === '1';
 let pendingEvent = null;
 let bootstrappingLatestYear = false;
 
 if (!hasExplicitYearParam && currentYear !== '2024') {
   try {
-    const url = new URL(window.parent.location.href);
+    const url = getAppStateBaseUrl();
+    if (!url) throw new Error('Parent URL unavailable');
     url.searchParams.set('year', '2024');
     bootstrappingLatestYear = true;
-    window.parent.location.replace(url.toString());
+    replaceParentLocation(url.toString());
   } catch (e) {
     // Ignore cross-origin or history access issues and continue with injected state.
   }
@@ -97,6 +182,83 @@ let mapInstance = null;
 let geoLayer = null;
 let baseGeoJson = null;
 let hasFitBounds = false;
+let baseTileLayer = null;
+let pendingMapInitFrame = null;
+
+const BASE_TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const TOUR_STORAGE_KEY = 'hd_tour_v1_completed';
+const STATE_BOUNDS = {
+  Abia: { s: 4.7, w: 7.1, n: 5.9, e: 8.1 },
+  Adamawa: { s: 7.8, w: 11.5, n: 10.9, e: 13.7 },
+  'Akwa Ibom': { s: 4.3, w: 7.4, n: 5.3, e: 8.6 },
+  Anambra: { s: 5.7, w: 6.6, n: 6.8, e: 7.3 },
+  Bauchi: { s: 9.3, w: 8.8, n: 12.3, e: 11.1 },
+  Bayelsa: { s: 4.1, w: 5.7, n: 5.1, e: 6.8 },
+  Benue: { s: 6.2, w: 7.7, n: 8.2, e: 10.0 },
+  Borno: { s: 9.9, w: 11.0, n: 13.9, e: 15.1 },
+  'Cross River': { s: 4.3, w: 7.8, n: 6.9, e: 9.6 },
+  Delta: { s: 4.9, w: 5.3, n: 6.5, e: 7.0 },
+  Ebonyi: { s: 5.7, w: 7.7, n: 6.7, e: 8.6 },
+  Edo: { s: 5.7, w: 5.0, n: 7.2, e: 6.9 },
+  Ekiti: { s: 7.4, w: 4.8, n: 8.2, e: 5.9 },
+  Enugu: { s: 5.9, w: 6.9, n: 7.2, e: 8.1 },
+  FCT: { s: 8.3, w: 6.8, n: 9.4, e: 7.8 },
+  Gombe: { s: 9.5, w: 10.0, n: 11.2, e: 12.1 },
+  Imo: { s: 4.9, w: 6.6, n: 5.9, e: 7.5 },
+  Jigawa: { s: 11.0, w: 8.2, n: 13.0, e: 10.7 },
+  Kaduna: { s: 9.0, w: 6.8, n: 11.4, e: 9.5 },
+  Kano: { s: 11.0, w: 8.0, n: 13.0, e: 9.5 },
+  Katsina: { s: 11.5, w: 6.5, n: 13.9, e: 9.3 },
+  Kebbi: { s: 10.1, w: 3.8, n: 13.2, e: 6.3 },
+  Kogi: { s: 6.7, w: 5.7, n: 8.9, e: 7.9 },
+  Kwara: { s: 7.7, w: 2.5, n: 9.8, e: 6.6 },
+  Lagos: { s: 6.3, w: 2.7, n: 6.8, e: 3.9 },
+  Nasarawa: { s: 7.8, w: 7.5, n: 9.4, e: 9.3 },
+  Niger: { s: 8.2, w: 3.8, n: 11.7, e: 7.3 },
+  Ogun: { s: 6.3, w: 2.7, n: 7.8, e: 4.3 },
+  Ondo: { s: 5.7, w: 4.5, n: 7.7, e: 6.4 },
+  Osun: { s: 7.0, w: 4.0, n: 8.2, e: 5.1 },
+  Oyo: { s: 6.8, w: 2.7, n: 9.1, e: 4.6 },
+  Plateau: { s: 8.2, w: 8.2, n: 10.4, e: 10.5 },
+  Rivers: { s: 4.2, w: 6.4, n: 5.5, e: 7.5 },
+  Sokoto: { s: 11.5, w: 4.2, n: 13.9, e: 6.8 },
+  Taraba: { s: 6.5, w: 9.8, n: 9.4, e: 12.5 },
+  Yobe: { s: 10.5, w: 10.8, n: 13.8, e: 13.5 },
+  Zamfara: { s: 11.1, w: 5.8, n: 13.9, e: 8.0 },
+  'All Nigeria': null,
+};
+const MAP_MODES = {
+  polygon: {
+    label: 'Data',
+    tile: null,
+    bg: '#090b10',
+    fillOpacity: 0.95,
+    strokeColor: '#1a1a2e',
+    strokeWeight: 0.7,
+    strokeOpacity: 0.95,
+  },
+  dark: {
+    label: 'Map',
+    tile: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    tileOpts: { attribution: BASE_TILE_ATTRIBUTION, subdomains: 'abcd', maxZoom: 19 },
+    bg: '#090b10',
+    fillOpacity: 0.82,
+    strokeColor: '#0f172a',
+    strokeWeight: 0.25,
+    strokeOpacity: 0.75,
+  },
+  print: {
+    label: 'Print',
+    tile: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+    tileOpts: { attribution: BASE_TILE_ATTRIBUTION, subdomains: 'abcd', maxZoom: 19 },
+    bg: '#f3efe7',
+    fillOpacity: 0.88,
+    colorOverride: true,
+    strokeColor: '#f1d2b4',
+    strokeWeight: 0.35,
+    strokeOpacity: 0.9,
+  },
+};
 
 let stateSyncTimer = null;
 let pendingStateUrl = '';
@@ -116,8 +278,9 @@ function hideBootOverlay() {
 
   let dismissed = false;
   try {
-    if (window.parent && window.parent !== window) {
-      dismissed = dismissFromDocument(window.parent.document);
+    const parentDoc = getParentDocument();
+    if (parentDoc) {
+      dismissed = dismissFromDocument(parentDoc);
     }
   } catch (err) {
     // Cross-origin iframe restrictions: ignore and try local document.
@@ -155,10 +318,26 @@ const hasTowerConnectivityData = lgas.some((lga) => {
   return value != null && value > 0;
 });
 
+function scoreOutOfTen(source) {
+  const riskScoreTotal = safeNum(source?.risk_score_total);
+  if (riskScoreTotal != null) return riskScoreTotal;
+
+  const riskTotal = safeNum(source?.risk_total);
+  if (riskTotal != null) return riskTotal;
+
+  const riskScore = safeNum(source?.risk_score);
+  if (riskScore != null) return riskScore <= 1 ? riskScore * 10 : riskScore;
+
+  const risk = safeNum(source?.risk);
+  if (risk != null) return risk <= 1 ? risk * 10 : risk;
+
+  return null;
+}
+
 function riskLabel(r, total) {
   const t = safeNum(total);
-  if (t != null) return t.toFixed(1);
-  return r == null || Number.isNaN(Number(r)) ? 'NA' : (Number(r) * 100).toFixed(0);
+  if (t != null) return t.toFixed(2);
+  return r == null || Number.isNaN(Number(r)) ? 'NA' : (Number(r) * 10).toFixed(2);
 }
 
 function confidenceBadge(conf) {
@@ -201,32 +380,257 @@ function metricClass(value, lowThreshold, midThreshold, invert = false) {
   return 'metric-value-green';
 }
 
+function interpolateColor(hex1, hex2, t) {
+  const r1 = parseInt(hex1.slice(1, 3), 16);
+  const g1 = parseInt(hex1.slice(3, 5), 16);
+  const b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16);
+  const g2 = parseInt(hex2.slice(3, 5), 16);
+  const b2 = parseInt(hex2.slice(5, 7), 16);
+  return `rgb(${Math.round(r1 + (r2 - r1) * t)},${Math.round(g1 + (g2 - g1) * t)},${Math.round(b1 + (b2 - b1) * t)})`;
+}
+
+function getColor(score) {
+  if (score === null || score === undefined || Number.isNaN(Number(score))) return 'rgba(80,80,90,0.4)';
+  const MEDIAN = 5.5;
+  const s = Math.max(0, Math.min(10, Number(score)));
+  if (s <= MEDIAN) {
+    const t = 1 - (s / MEDIAN);
+    return interpolateColor('#aec4d6', '#2166ac', t);
+  }
+  const t = (s - MEDIAN) / (10 - MEDIAN);
+  return interpolateColor('#e8a49a', '#d73027', t);
+}
+
 function riskColorHex(r) {
-  if (r == null || Number.isNaN(Number(r))) return 'rgba(52, 211, 153, 0.6)';
+  if (r == null || Number.isNaN(Number(r))) return 'rgba(80,80,90,0.4)';
   const v = Math.max(0, Math.min(1, Number(r)));
-  if (v > 0.66) {
-    const t = (v - 0.66) / 0.34;
-    return `rgba(239, ${Math.round(68 - 68 * t)}, ${Math.round(68 - 68 * t)}, ${0.7 + t * 0.2})`;
+  if (v <= 0.5) return interpolateColor('#2166ac', '#aec4d6', v / 0.5);
+  return interpolateColor('#e8a49a', '#d73027', (v - 0.5) / 0.5);
+}
+
+function getPrintColor(score) {
+  if (score === null || score === undefined || Number.isNaN(Number(score))) return '#e5e5e5';
+  const s = Math.max(0, Math.min(10, Number(score)));
+  return interpolateColor('#ffe0b2', '#bf360c', s / 10);
+}
+
+const CHIP_COLOR_FIELD = {
+  'All risk': {
+    field: 'risk_total',
+    lowerIsWorse: false,
+    getValue: (source) => scoreOutOfTen(source),
+  },
+  'Child mortality': {
+    field: 'u5mr',
+    lowerIsWorse: false,
+    getValue: (source) => safeNum(source?.u5mr ?? source?.u5_mortality_rate ?? source?.u5mr_mean),
+  },
+  'Facility access': {
+    field: 'fac',
+    lowerIsWorse: true,
+    getValue: (source) => safeNum(source?.fac ?? source?.facilities_per_10k),
+  },
+  Connectivity: {
+    field: 'towers',
+    lowerIsWorse: true,
+    getValue: (source) => safeNum(source?.towers ?? source?.towers_per_10k ?? source?.connectivity_score),
+  },
+  '5km coverage': {
+    field: 'cov',
+    lowerIsWorse: true,
+    getValue: (source) => safeNum(source?.cov ?? source?.coverage_5km),
+  },
+  '60-min coverage': {
+    field: 'pop_pct_60min',
+    lowerIsWorse: true,
+    getValue: (source) => safeNum(source?.pop_pct_60min),
+  },
+};
+
+function getMapModeConfig(mode = currentMapMode) {
+  return MAP_MODES[mode] || MAP_MODES.polygon;
+}
+
+function getFeatureStateName(source) {
+  return sanitizeText(source?.state_name || source?.state || '', '');
+}
+
+function isFeatureInCurrentState(source) {
+  return currentState === 'All Nigeria' || getFeatureStateName(source) === currentState;
+}
+
+function fillOpacityForFeature(source) {
+  return isFeatureInCurrentState(source) ? getMapModeConfig().fillOpacity : 0.15;
+}
+
+function focusColorCacheKey(focus = currentFocus) {
+  return `focus-color:${focus}`;
+}
+
+function getFocusColorScore(source, focus = currentFocus) {
+  const cfg = CHIP_COLOR_FIELD[focus] || CHIP_COLOR_FIELD['All risk'];
+  if (cfg.field === 'risk_total') {
+    return scoreOutOfTen(source);
   }
-  if (v > 0.33) {
-    const t = (v - 0.33) / 0.33;
-    return `rgba(${Math.round(234 * t + 34 * (1 - t))}, ${Math.round(179 * t + 197 * (1 - t))}, ${Math.round(8 * t + 94 * (1 - t))}, 0.75)`;
+
+  const cacheKey = focusColorCacheKey(focus);
+  if (!fieldValuesCache.has(cacheKey)) {
+    const values = lgas
+      .map((lga) => cfg.getValue(lga))
+      .filter((value) => value != null && !Number.isNaN(value));
+    const min = values.length ? Math.min(...values) : 0;
+    const max = values.length ? Math.max(...values) : 0;
+    const range = max - min || 1;
+    const scoreMap = new Map();
+    lgas.forEach((lga) => {
+      const raw = cfg.getValue(lga);
+      if (raw == null || Number.isNaN(raw)) return;
+      const norm = ((Number(raw) - min) / range) * 10;
+      const score = cfg.lowerIsWorse ? 10 - norm : norm;
+      scoreMap.set(String(lga.id), score);
+    });
+    fieldValuesCache.set(cacheKey, scoreMap);
   }
-  return `rgba(34, 197, 94, ${0.4 + v * 0.8})`;
+
+  const scoreMap = fieldValuesCache.get(cacheKey);
+  const sourceId = source?.id ?? source?.lga_id ?? source?.lga_uid;
+  if (sourceId != null && scoreMap?.has(String(sourceId))) {
+    return scoreMap.get(String(sourceId));
+  }
+
+  const raw = cfg.getValue(source);
+  if (raw == null || Number.isNaN(raw)) return null;
+  const values = Array.from(scoreMap?.values?.() || []);
+  if (!values.length) return null;
+  const sourceNorm = Math.max(0, Math.min(10, Number(raw)));
+  return cfg.lowerIsWorse ? 10 - sourceNorm : sourceNorm;
+}
+
+function scoreForCurrentLayer(source, layer = currentLayer) {
+  if (!source) return null;
+  if (layer === 'Risk score') return getFocusColorScore(source, currentFocus);
+  if (layer === 'Facilities' || layer === 'Connectivity' || layer === 'Towers') {
+    return badnessForLayer(source, layer);
+  }
+  const norm = scaledLayerValue(source.id ?? source.lga_id ?? source.lga_uid);
+  return norm == null ? null : norm * 10;
+}
+
+function fillColorForFeature(source, layer = currentLayer) {
+  const score = scoreForCurrentLayer(source, layer);
+  if (getMapModeConfig().colorOverride) {
+    return getPrintColor(score);
+  }
+  if (layer === 'SHAP') {
+    const norm = scaledLayerValue(source.id ?? source.lga_id ?? source.lga_uid);
+    return riskColorHex(norm);
+  }
+  return getColor(score);
+}
+
+function applyStateDimming() {
+  if (!mapInstance) return;
+  mapInstance.eachLayer((layer) => {
+    if (!layer.feature || typeof layer.setStyle !== 'function') return;
+    layer.setStyle({ fillOpacity: fillOpacityForFeature(layer.feature.properties) });
+  });
+}
+
+function fitMapToCurrentState() {
+  if (!mapInstance) return;
+  const bb = STATE_BOUNDS[currentState];
+  if (bb) {
+    mapInstance.fitBounds([[bb.s, bb.w], [bb.n, bb.e]], { padding: [40, 40], maxZoom: 9 });
+    return;
+  }
+  mapInstance.fitBounds([[4.1, 2.5], [13.9, 15.1]], { padding: [20, 20] });
+}
+
+function applyMapModeBaseLayer() {
+  const mapEl = document.getElementById('map-leaflet');
+  if (mapEl) {
+    mapEl.style.background = getMapModeConfig().bg || '#090b10';
+  }
+
+  if (!mapInstance) return;
+
+  if (baseTileLayer) {
+    mapInstance.removeLayer(baseTileLayer);
+    baseTileLayer = null;
+  }
+
+  const cfg = getMapModeConfig();
+  if (cfg.tile) {
+    baseTileLayer = L.tileLayer(cfg.tile, cfg.tileOpts).addTo(mapInstance);
+    baseTileLayer.on('tileerror', (e) => {
+      console.warn('[HDS] tile error:', e?.tile?.src);
+    });
+    if (typeof baseTileLayer.bringToBack === 'function') {
+      baseTileLayer.bringToBack();
+    }
+  }
+
+  if (geoLayer && typeof geoLayer.bringToFront === 'function') {
+    geoLayer.bringToFront();
+  }
+}
+
+function switchMapMode(mode) {
+  if (!MAP_MODES[mode]) return;
+  currentMapMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+  applyMapModeBaseLayer();
+  renderMap();
+  applyStateDimming();
+}
+
+function handleStateChange(selectedState) {
+  currentState = selectedState;
+  syncHeader();
+  renderHotspots();
+  renderMap();
+  fitMapToCurrentState();
+  applyStateDimming();
+  pushStateToPython();
+  queueEvent('filter_change', { state: currentState });
+}
+
+function markTourComplete() {
+  localStorage.setItem(TOUR_STORAGE_KEY, '1');
+}
+
+function isTourOpen() {
+  const overlay = document.getElementById('tour-overlay');
+  return Boolean(overlay?.classList.contains('open'));
 }
 
 function setApplyStatus(label, mode = 'applied') {
-  const status = document.getElementById('apply-status');
-  if (!status) return;
+  const statusText = document.getElementById('apply-status-text');
+  if (statusText) {
+    statusText.textContent = mode === 'updating' ? 'updating' : 'ready';
+  }
 
-  const dot = document.createElement('span');
-  dot.className = 'status-dot';
-  if (mode === 'applied') dot.classList.add('status-dot-static');
-
-  status.replaceChildren(dot, document.createTextNode(label));
+  const dot = document.querySelector('.header-status .status-dot');
+  if (dot) {
+    dot.classList.toggle('is-updating', mode === 'updating');
+  }
 }
 
 function syncHeader() {
+  const headerCount = meta.lga_count || lgas.length || '-';
+  const headerYear = currentYear || '-';
+  const stateDisplay = document.getElementById('state-display');
+  if (stateDisplay) stateDisplay.textContent = currentState;
+
+  const yearDisplay = document.getElementById('year-display');
+  if (yearDisplay) yearDisplay.textContent = headerYear;
+
+  const lgaCount = document.getElementById('lga-count');
+  if (lgaCount) lgaCount.textContent = String(headerCount);
+
   const metaEl = document.getElementById('dataset-meta-text');
   if (metaEl) {
     const count = meta.lga_count || lgas.length || '—';
@@ -261,9 +665,10 @@ function syncHeader() {
     btn.setAttribute('aria-pressed', String(active));
   });
 
-  document.querySelectorAll('.chip').forEach((chip) => {
+  document.querySelectorAll('.focus-section .chip').forEach((chip) => {
     const active = chip.dataset.focus === currentFocus;
     chip.classList.toggle('active', active);
+    chip.classList.toggle('chip-sel', active);
     chip.setAttribute('aria-pressed', String(active));
   });
 
@@ -304,7 +709,10 @@ function applyDepthVisibility() {
 }
 
 function buildStateUrl() {
-  const params = new URLSearchParams(window.parent.location.search);
+  const url = getAppStateBaseUrl();
+  if (!url) return null;
+
+  const params = new URLSearchParams(url.search);
   params.set('state', currentState);
   params.set('focus', currentFocus);
   params.set('depth', String(currentDepth));
@@ -328,13 +736,19 @@ function buildStateUrl() {
     }
   }
 
-  return `${window.parent.location.pathname}?${params.toString()}`;
+  return `${url.pathname}?${params.toString()}`;
 }
 
 function flushStateToPython() {
   if (stateSyncLocked || !pendingStateUrl) return;
 
-  const currentUrl = `${window.parent.location.pathname}${window.parent.location.search}`;
+  const url = getAppStateBaseUrl() || getParentUrl();
+  if (!url) {
+    pendingStateUrl = '';
+    return;
+  }
+
+  const currentUrl = `${url.pathname}${url.search}`;
   if (pendingStateUrl === currentUrl) {
     setApplyStatus('Applied', 'applied');
     pendingStateUrl = '';
@@ -343,11 +757,15 @@ function flushStateToPython() {
 
   stateSyncLocked = true;
   pendingEvent = null;
-  window.parent.location.replace(pendingStateUrl);
+  if (!replaceParentLocation(pendingStateUrl)) {
+    stateSyncLocked = false;
+    pendingStateUrl = '';
+  }
 }
 
 function pushStateToPython({ immediate = false } = {}) {
   pendingStateUrl = buildStateUrl();
+  if (!pendingStateUrl) return;
 
   if (stateSyncTimer) {
     clearTimeout(stateSyncTimer);
@@ -436,6 +854,40 @@ if (urlParams.get('hotspot_limit')) {
   }
 }
 
+function renderHotspotCard(item, index) {
+  const lgaId = sanitizeText(item.lga_id || item.id || '');
+  const score = scoreOutOfTen(item) || 0;
+  const scoreColor = score > 5.5 ? '#d73027' : '#2166ac';
+  const barColor = scoreColor;
+  const barWidth = Math.min(100, Math.max(0, score * 10)).toFixed(1);
+  const driver = sanitizeText(item.worst_driver, '');
+  const driverHtml = driver
+    ? `<span class="lga-driver">${escapeHtml(driver)}</span>`
+    : '';
+  const selectedClass = String(selectedLGA?.id) === String(lgaId) ? ' active' : '';
+  const name = sanitizeText(item.lga_name || item.name || '', '');
+  const state = sanitizeText(item.state_name || item.state || '', '');
+
+  return `
+    <div class="hotspot-item${selectedClass}" role="button" tabindex="0" data-lga-id="${escapeHtml(lgaId)}" onclick="selectLGA('${escapeHtml(lgaId)}')">
+      <span class="hotspot-rank">${String(index + 1).padStart(2, '0')}</span>
+      <div class="hotspot-info">
+        <div class="hotspot-name">${escapeHtml(name)}</div>
+        <div class="hotspot-meta">
+          <span class="hotspot-state">${escapeHtml(state)}</span>
+          ${driverHtml}
+        </div>
+      </div>
+      <div class="hotspot-score-col">
+        <span class="hotspot-score" style="color:${scoreColor}">${score.toFixed(2)}</span>
+        <div class="hotspot-bar-wrap">
+          <div class="hotspot-bar" style="width:${barWidth}%;background:${barColor}"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderHotspots() {
   const list = document.getElementById('hotspot-list');
   if (!list) return;
@@ -443,8 +895,13 @@ function renderHotspots() {
   const query = (document.getElementById('search-input')?.value || '').toLowerCase();
   const base = hotspotsBase();
   const filtered = query
-    ? base.filter((l) => `${sanitizeText(l.name)} ${sanitizeText(l.state)}`.toLowerCase().includes(query))
+    ? base.filter((l) => {
+      const name = sanitizeText(l.lga_name || l.name);
+      const state = sanitizeText(l.state_name || l.state);
+      return `${name} ${state}`.toLowerCase().includes(query);
+    })
     : base;
+  window.__hdHotspots = filtered.length ? filtered : base;
 
   list.replaceChildren();
   if (!filtered.length) {
@@ -457,47 +914,18 @@ function renderHotspots() {
     return;
   }
 
-  // Show up to hotspotDisplayLimit LGAs (default 12, configurable via URL param hotspot_limit)
-  filtered.slice(0, hotspotDisplayLimit).forEach((lga, i) => {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'hotspot-card';
-    if (String(selectedLGA?.id) === String(lga.id)) card.classList.add('active');
-    card.style.animationDelay = isMobile ? '0s' : `${i * 0.04}s`;
-    card.setAttribute('aria-label', `Select ${sanitizeText(lga.name, 'LGA')}`);
+  list.innerHTML = filtered
+    .slice(0, hotspotDisplayLimit)
+    .map((lga, i) => renderHotspotCard(lga, i))
+    .join('');
 
-    const rank = document.createElement('div');
-    rank.className = 'hotspot-rank';
-    rank.textContent = String(lga.rank ?? i + 1).padStart(2, '0');
-
-    const info = document.createElement('div');
-    info.className = 'hotspot-info';
-
-    const name = document.createElement('div');
-    name.className = 'hotspot-name';
-    name.textContent = sanitizeText(lga.name, 'Unnamed LGA');
-
-    const state = document.createElement('div');
-    state.className = 'hotspot-state';
-    state.textContent = sanitizeText(lga.state, 'Unknown state');
-
-    info.append(name, state);
-
-    const scoreWrap = document.createElement('div');
-    scoreWrap.className = 'hotspot-score';
-
-    const badge = document.createElement('div');
-    const risk = safeNum(lga.risk);
-    const riskTotal = safeNum(lga.risk_total);
-    const riskScore = riskTotal != null ? riskTotal / 10 : risk;
-    const bucket = riskScore != null && riskScore > 0.66 ? 'risk-high' : riskScore != null && riskScore > 0.33 ? 'risk-med' : 'risk-low';
-    badge.className = `risk-badge ${bucket}`;
-    badge.textContent = riskLabel(risk, riskTotal);
-
-    scoreWrap.append(badge);
-    card.append(rank, info, scoreWrap);
-    card.addEventListener('click', () => selectLGA(lga.id));
-    list.appendChild(card);
+  list.querySelectorAll('.hotspot-item').forEach((item) => {
+    item.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectLGA(item.dataset.lgaId || '');
+      }
+    });
   });
 }
 
@@ -681,15 +1109,11 @@ function renderDetail() {
     ? Math.max(...shapRows.map(([, v]) => Math.abs(Number(v))))
     : 1;
 
-  const riskNum = safeNum(lga.risk);
-  const riskTotal = safeNum(lga.risk_total);
+  const heroScore = scoreOutOfTen(lga);
+  const heroScoreColor = heroScore != null && heroScore > 5.5 ? '#d73027' : '#2166ac';
+  const heroScoreDisplay = heroScore != null ? heroScore.toFixed(2) : 'NA';
+  const stateLabel = sanitizeText(lga.state_name || lga.state, 'Unknown state');
   const conf = confidenceBadge(lga.confidence_pct);
-  const riskScore = riskTotal != null ? riskTotal / 10 : riskNum;
-  const riskClass = riskScore != null && riskScore > 0.66
-    ? 'metric-risk-red'
-    : riskScore != null && riskScore > 0.33
-      ? 'metric-risk-yellow'
-      : 'metric-risk-green';
 
   const pctRows = [
     { label: 'Facility access', pct: facPct },
@@ -829,13 +1253,19 @@ function renderDetail() {
       <div>
         <div class="detail-lga">${escapeHtml(sanitizeText(lga.name, 'Unknown LGA'))}</div>
         <div class="detail-state-tag">
-          ${escapeHtml(sanitizeText(lga.state, 'Unknown state'))} - Risk score:
-          <span class="metric-risk ${riskClass}">${escapeHtml(riskLabel(riskNum, riskTotal))}</span>
+          ${escapeHtml(stateLabel)}
           ${isResearch ? '<span class="research-mode-tag">RESEARCH</span>' : ''}
         </div>
         <div class="detail-state-tag" title="${escapeHtml(conf.title || '')}">Data confidence: ${conf.emoji} ${escapeHtml(conf.label)} <span class="conf-band-note">(estimated band)</span></div>
       </div>
       <button type="button" class="close-btn" id="detail-close-btn" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="detail-score-hero">
+      <div class="detail-score-val" style="color:${heroScoreColor}">
+        ${heroScoreDisplay}
+      </div>
+      <div class="detail-score-label">RISK SCORE &middot; ${escapeHtml(stateLabel)}</div>
     </div>
 
     ${compareBtnHtml}
@@ -908,7 +1338,8 @@ function setDepth(depth) {
 function setFocus(focus) {
   currentFocus = focus;
   syncHeader();
-  renderHotspots(); // Re-render hotspots with new focus sorting
+  renderHotspots();
+  renderMap();
   pushStateToPython();
   queueEvent('focus_change', { focus: currentFocus });
 }
@@ -930,14 +1361,39 @@ function selectLGA(id) {
   queueEvent('lga_select', { id: String(id), name: selectedLGA?.name });
 }
 
+function addToCompare(lgaId) {
+  const target = lgaById.get(String(lgaId));
+  if (!target) return false;
+  if (compareLGAs.find((l) => String(l.id) === String(target.id))) return false;
+  if (compareLGAs.length >= 4) return false;
+
+  compareLGAs.push({ ...target });
+  renderCompareSlots();
+  if (selectedLGA) renderDetail();
+  pushStateToPython();
+  return true;
+}
+
 function addCompareSlot() {
   if (!selectedLGA) return;
-  if (compareLGAs.find((l) => String(l.id) === String(selectedLGA.id))) return;
-  if (compareLGAs.length >= 4) return;
+  addToCompare(selectedLGA.id);
+}
 
-  compareLGAs.push(selectedLGA);
-  renderCompareSlots();
-  pushStateToPython();
+function seedCompareFromHotspots() {
+  const rankedSets = [
+    Array.isArray(window.__hdHotspots) ? window.__hdHotspots : [],
+    hotspotsBase(),
+  ];
+  for (const ranked of rankedSets) {
+    for (const lga of ranked) {
+      const id = String(lga?.lga_id ?? lga?.id ?? '');
+      if (!id) continue;
+      addToCompare(id);
+      if (compareLGAs.length >= 2) break;
+    }
+    if (compareLGAs.length >= 2) break;
+  }
+  return compareLGAs.length >= 2;
 }
 
 function removeCompare(id) {
@@ -1105,10 +1561,27 @@ function runCompare() {
 }
 
 function initMap() {
-  if (mapInstance) return;
-  mapInstance = L.map('map-leaflet', {
+  if (mapInstance) {
+    queueMapResize();
+    return;
+  }
+  if (typeof L === 'undefined') {
+    setMapEmptyState('Map library failed to load. Try refreshing.');
+    return;
+  }
+
+  const mapEl = document.getElementById('map-leaflet');
+  if (!mapEl) return;
+
+  const rect = mapEl.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    scheduleMapInit();
+    return;
+  }
+
+  mapInstance = L.map(mapEl, {
     zoomControl: false,
-    attributionControl: false,
+    attributionControl: true,
     minZoom: 5,
     maxZoom: 12,
   }).setView([9.1, 8.7], 6);
@@ -1118,6 +1591,11 @@ function initMap() {
   if (mapInstance.fullscreenControl == null && L.Control.Fullscreen) {
     mapInstance.addControl(new L.Control.Fullscreen({ position: 'topleft' }));
   }
+
+  applyMapModeBaseLayer();
+  queueMapResize();
+  queueMapResize(120);
+  queueMapResize(320);
 }
 
 function setMapEmptyState(message) {
@@ -1137,6 +1615,39 @@ function setMapEmptyState(message) {
 
 function clearMapEmptyState() {
   document.getElementById('map-empty-state')?.remove();
+}
+
+function queueMapResize(delay = 0) {
+  if (!mapInstance) return;
+  window.setTimeout(() => {
+    if (!mapInstance) return;
+    try {
+      mapInstance.invalidateSize();
+    } catch (e) {
+      // ignore delayed resize errors
+    }
+  }, delay);
+}
+
+function scheduleMapInit() {
+  if (pendingMapInitFrame != null) return;
+  pendingMapInitFrame = window.requestAnimationFrame(() => {
+    pendingMapInitFrame = null;
+    renderMap();
+  });
+}
+
+function reportBootError(err) {
+  console.error('[HDS] boot error:', err);
+  const list = document.getElementById('hotspot-list');
+  if (list && !list.children.length) {
+    const empty = document.createElement('div');
+    empty.className = 'hotspot-empty';
+    empty.textContent = 'App failed to initialize. Open the iframe console for details.';
+    list.replaceChildren(empty);
+  }
+  setMapEmptyState('App failed to initialize. Open the iframe console for details.');
+  scheduleBootOverlayHide(0);
 }
 
 function normalizeGeoJson() {
@@ -1213,6 +1724,89 @@ function getLayerRange(layer) {
   return range;
 }
 
+function quantileFromSorted(sorted, q) {
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  const next = sorted[base + 1];
+  if (next === undefined) return sorted[base];
+  return sorted[base] + rest * (next - sorted[base]);
+}
+
+function getLayerStats(layer) {
+  const key = `stats:${layer}`;
+  if (fieldValuesCache.has(key)) return fieldValuesCache.get(key);
+
+  const values = lgas
+    .map((l) => valueForLayer(l, layer))
+    .filter((v) => v != null && !Number.isNaN(v))
+    .sort((a, b) => a - b);
+
+  const stats = {
+    min: values.length ? values[0] : 0,
+    q25: quantileFromSorted(values, 0.25) ?? 0,
+    q50: quantileFromSorted(values, 0.5) ?? 0,
+    q75: quantileFromSorted(values, 0.75) ?? 0,
+    max: values.length ? values[values.length - 1] : 0,
+  };
+  fieldValuesCache.set(key, stats);
+  return stats;
+}
+
+function interpolateBadness(value, bad, mid, good) {
+  if (value == null || Number.isNaN(value)) return null;
+  const safeBad = Number.isFinite(bad) ? bad : value;
+  const safeMid = Number.isFinite(mid) ? Math.max(mid, safeBad + 1e-6) : safeBad + 1;
+  const safeGood = Number.isFinite(good) ? Math.max(good, safeMid + 1e-6) : safeMid + 1;
+
+  if (value <= safeBad) return 10;
+  if (value >= safeGood) return 0;
+  if (value <= safeMid) {
+    const t = (value - safeBad) / (safeMid - safeBad);
+    return 10 - (t * 4.5);
+  }
+  const t = (value - safeMid) / (safeGood - safeMid);
+  return 5.5 - (t * 5.5);
+}
+
+function badnessForLayer(lga, layer = currentLayer) {
+  const val = valueForLayer(lga, layer);
+  if (val == null || Number.isNaN(val)) return null;
+
+  switch (layer) {
+    case 'Facilities':
+      // Align map colors with the panel's facility-access semantics.
+      return interpolateBadness(val, 0.5, 1.5, 3.0);
+    case 'Connectivity':
+    case 'Towers': {
+      const stats = getLayerStats(layer);
+      return interpolateBadness(
+        val,
+        Math.max(0.25, stats.q25 ?? 0.25),
+        Math.max(1.5, stats.q50 ?? 1.5),
+        Math.max(5.0, stats.q75 ?? 5.0),
+      );
+    }
+    case 'Risk score':
+      return scoreOutOfTen(lga);
+    default:
+      return null;
+  }
+}
+
+function colorForLayer(lga, layer = currentLayer) {
+  if (!lga) return 'rgba(80,80,90,0.4)';
+  if (layer === 'Risk score') return getColor(scoreOutOfTen(lga));
+
+  const badness = badnessForLayer(lga, layer);
+  if (badness != null) return getColor(badness);
+
+  const norm = scaledLayerValue(lga.id);
+  return riskColorHex(norm);
+}
+
 function scaledLayerValue(id) {
   const lga = lgaById.get(String(id));
   const val = valueForLayer(lga, currentLayer);
@@ -1230,28 +1824,48 @@ function scaledLayerValue(id) {
 function displayValue(id) {
   const lga = lgaById.get(String(id));
   const val = valueForLayer(lga, currentLayer);
-  return currentLayer === 'Risk score' ? riskLabel(val) : fmtMetric(val);
+  if (currentLayer === 'Risk score') {
+    const score = scoreOutOfTen(lga);
+    return score == null ? 'NA' : score.toFixed(2);
+  }
+  return fmtMetric(val);
 }
 
-function tooltipHtml(id, fallbackName, fallbackState) {
-  const lga = lgaById.get(String(id));
-  const safeName = escapeHtml(sanitizeText(lga?.name ?? fallbackName ?? id, 'Unknown LGA'));
-  const safeState = escapeHtml(sanitizeText(lga?.state ?? fallbackState, ''));
-  const safeLabel = escapeHtml(layerLabel(currentLayer));
-  const safeVal = escapeHtml(displayValue(id));
-
-  return `<div class="hd-tip"><div class="hd-tip-title">${safeName}</div><div class="hd-tip-sub">${safeState}</div><div class="hd-tip-risk">${safeLabel}: ${safeVal}</div></div>`;
+function buildTooltipHTML(props) {
+  const score = Number(scoreOutOfTen(props) || 0);
+  const scoreColor = score > 5.5 ? '#d73027' : '#2166ac';
+  const driver = sanitizeText(props.worst_driver, '');
+  const driverHtml = driver
+    ? `<div style="margin-top:5px;font-size:8px;padding:2px 6px;border-radius:3px;
+        background:rgba(215,48,39,0.12);color:#fca5a5;display:inline-block;
+        letter-spacing:.04em">${escapeHtml(driver)}</div>`
+    : '';
+  return `
+    <div style="font-family:'IBM Plex Mono',monospace;min-width:130px;padding:2px">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;
+        color:#e8eaf0;margin-bottom:2px">${escapeHtml(sanitizeText(props.lga_name || props.name, ''))}</div>
+      <div style="font-size:9px;color:#6b7280;letter-spacing:.06em;margin-bottom:6px">
+        ${escapeHtml(sanitizeText(props.state_name || props.state, ''))}</div>
+      <div style="font-size:28px;font-weight:800;font-family:'Syne',sans-serif;
+        color:${scoreColor};line-height:1">${score.toFixed(2)}</div>
+      <div style="font-size:8px;color:#4b5563;letter-spacing:.1em;
+        text-transform:uppercase;margin-top:1px">RISK SCORE</div>
+      ${driverHtml}
+    </div>
+  `;
 }
 
 function styleForFeatureId(id) {
-  const norm = scaledLayerValue(id);
-  const fill = riskColorHex(norm);
+  const lga = lgaById.get(String(id));
+  const fill = fillColorForFeature(lga, currentLayer);
   const selected = selectedLGA && String(selectedLGA.id) === String(id);
+  const modeCfg = getMapModeConfig();
   return {
-    color: selected ? '#ffffff' : '#0f172a',
-    weight: selected ? 2.5 : 0.25,
+    color: selected ? '#ffffff' : modeCfg.strokeColor,
+    weight: selected ? 2.5 : modeCfg.strokeWeight,
+    opacity: selected ? 1 : modeCfg.strokeOpacity,
     fillColor: fill,
-    fillOpacity: 0.45,
+    fillOpacity: fillOpacityForFeature(lga),
   };
 }
 
@@ -1268,11 +1882,14 @@ function initGeoLayer() {
     },
     onEachFeature: (feature, layer) => {
       const id = String(feature.properties?.lga_uid ?? feature.properties?.lga_name ?? '');
-      const name = feature.properties?.lga_name;
-      const state = feature.properties?.state_name;
+      const props = {
+        ...(feature.properties || {}),
+        ...(lgaById.get(id) || {}),
+      };
+      feature.properties = props;
 
       featureLayerById.set(id, layer);
-      layer.bindTooltip(tooltipHtml(id, name, state), {
+      layer.bindTooltip(buildTooltipHTML(feature.properties), {
         sticky: true,
         direction: 'top',
         className: 'hd-tooltip',
@@ -1289,6 +1906,8 @@ function initGeoLayer() {
       // ignore fit errors
     }
   }
+
+  queueMapResize();
 }
 
 function renderMap() {
@@ -1301,10 +1920,15 @@ function renderMap() {
   featureLayerById.forEach((layer, id) => {
     layer.setStyle(styleForFeatureId(id));
     const feature = layer.feature || {};
-    const name = feature.properties?.lga_name;
-    const state = feature.properties?.state_name;
-    layer.setTooltipContent(tooltipHtml(id, name, state));
+    const props = {
+      ...(feature.properties || {}),
+      ...(lgaById.get(String(id)) || {}),
+    };
+    feature.properties = props;
+    layer.setTooltipContent(buildTooltipHTML(feature.properties));
   });
+
+  queueMapResize();
 }
 
 function renderMapTable() {
@@ -1365,7 +1989,9 @@ function buildShareUrl() {
   if (selectedLGA?.id) params.set('lga', String(selectedLGA.id));
   if (compareLGAs.length) params.set('compare', compareLGAs.map((l) => l.id).join(','));
   params.set('mobile', isMobile ? '1' : '0');
-  return `${window.parent.location.origin}/static/share_preview.html?${params.toString()}`;
+  const url = getAppStateBaseUrl();
+  if (!url) return `/static/share_preview.html?${params.toString()}`;
+  return `${url.origin}/static/share_preview.html?${params.toString()}`;
 }
 
 function updateShareDrawer() {
@@ -1525,6 +2151,9 @@ function buildSummaryExport() {
 }
 
 async function buildBundleExport() {
+  if (typeof JSZip === 'undefined') {
+    throw new Error('Bundle export is unavailable in this embedded render.');
+  }
   const zip = new JSZip();
   const csv = buildCsvExport();
   const geojson = buildGeoJsonExport();
@@ -1542,7 +2171,15 @@ async function downloadExport() {
   if (currentExportMode === 'csv') payload = buildCsvExport();
   if (currentExportMode === 'geojson') payload = buildGeoJsonExport();
   if (currentExportMode === 'summary') payload = buildSummaryExport();
-  if (currentExportMode === 'bundle') payload = await buildBundleExport();
+  if (currentExportMode === 'bundle') {
+    try {
+      payload = await buildBundleExport();
+    } catch (e) {
+      console.warn('[HDS] bundle export unavailable:', e?.message || e);
+      setExportMode('csv');
+      payload = buildCsvExport();
+    }
+  }
   if (!payload) return;
 
   const blob = payload.data instanceof Blob ? payload.data : new Blob([payload.data], { type: payload.type });
@@ -1571,26 +2208,50 @@ function setExportMode(mode) {
   help.textContent = text[mode] || '';
 }
 
-const tourSteps = [
+const TOUR_STEPS = [
   {
-    title: 'Welcome',
-    body: 'This tool highlights LGAs facing healthcare access barriers. It is designed for planning, not diagnosis.',
+    title: 'THE SCORE',
+    body: `Each LGA in Nigeria gets a <strong style="color:#f97316">0-10 risk score</strong>.
+      Higher means harder to reach care.<br><br>
+      <div style="font-family:'Syne',sans-serif;font-size:48px;font-weight:800;
+        color:#f97316;line-height:1;margin:12px 0">7.22</div>
+      <div style="font-size:10px;color:#4b5563;letter-spacing:.1em">
+        TAMBUWAL &middot; SOKOTO &middot; EXAMPLE</div>
+      <br>Score is based on facility density, distance to care,
+      child mortality, and mobile coverage.`,
+    cta: 'See the map ->',
   },
   {
-    title: 'Step 1 of 4: The map',
-    body: 'The map shows relative access barriers. Click any LGA to see details and confidence.',
+    title: 'THE MAP',
+    body: `<strong style="color:#d73027">Red</strong> means high risk.
+      <strong style="color:#2166ac">Blue</strong> means lower risk.<br><br>
+      The northwest cluster - Sokoto, Zamfara, Katsina - is Nigeria's
+      hardest-access zone. The South shows better access on average,
+      but significant LGA-level variation exists everywhere.<br><br>
+      Hover any LGA to see its score. Click to open full details.`,
+    cta: 'See the filters ->',
   },
   {
-    title: 'Step 2 of 4: Filters',
-    body: 'Use State, Year, and Focus to explore different access barriers.',
+    title: 'FILTER BY STATE',
+    body: `Use the <strong style="color:#f97316">STATE dropdown</strong>
+      in the header to focus on your state. The map zooms in,
+      non-selected LGAs dim, and the list updates to show only
+      your state's LGAs ranked by risk.<br><br>
+      Use the <strong>Risk dimension chips</strong> to re-rank by
+      a single factor: mortality, facilities, or connectivity.`,
+    cta: 'See the comparison ->',
   },
   {
-    title: 'Step 3 of 4: Highest-need list',
-    body: 'The list ranks LGAs by the selected focus so you can prioritize outreach.',
-  },
-  {
-    title: 'Step 4 of 4: Ready',
-    body: 'Try selecting a state, review the top LGAs, and export a list for planning.',
+    title: 'COMPARE LGAS',
+    body: `Select up to three LGAs and run a side-by-side comparison.
+      The heatmap shows which LGA scores worst on each dimension -
+      green is better, red is worse.<br><br>
+      <em style="color:#4b5563;font-size:10px">
+      Decision-support only. Always combine with local field knowledge
+      before planning decisions.</em><br><br>
+      Two LGAs have been pre-loaded for you. Run the comparison now ->`,
+    cta: 'Start exploring',
+    isLast: true,
   },
 ];
 
@@ -1609,25 +2270,30 @@ function closeTour(markComplete = false) {
   if (!overlay) return;
   overlay.classList.remove('open');
   overlay.setAttribute('aria-hidden', 'true');
-  if (markComplete) {
-    localStorage.setItem('hd_tour_v1_completed', '1');
-  }
+  if (markComplete) markTourComplete();
 }
 
 function renderTourStep() {
   const titleEl = document.getElementById('tour-step-title');
   const bodyEl = document.getElementById('tour-step-body');
   if (!titleEl || !bodyEl) return;
-  const step = tourSteps[tourIndex] || tourSteps[0];
+  const step = TOUR_STEPS[tourIndex] || TOUR_STEPS[0];
   titleEl.textContent = step.title;
-  bodyEl.textContent = step.body;
+  bodyEl.innerHTML = step.body;
   const nextBtn = document.getElementById('tour-next-btn');
-  if (nextBtn) nextBtn.textContent = tourIndex >= tourSteps.length - 1 ? 'Start' : 'Next';
+  if (nextBtn) nextBtn.textContent = step.cta || (step.isLast ? 'Start exploring' : 'Next');
 }
 
 function maybeStartTour() {
-  const completed = localStorage.getItem('hd_tour_v1_completed') === '1';
+  const completed = localStorage.getItem(TOUR_STORAGE_KEY) === '1';
   if (!completed) openTour();
+}
+
+function syncMobileMoreMeta() {
+  const target = document.getElementById('mobile-more-meta-text');
+  if (!target) return;
+  const count = document.getElementById('lga-count')?.textContent || String(lgas.length);
+  target.textContent = `${count} LGAs - ${currentYear}`;
 }
 
 function csvSafe(value) {
@@ -1710,12 +2376,7 @@ function wireEvents() {
   });
   stateSelect.value = currentState;
   stateSelect.addEventListener('change', (e) => {
-    currentState = e.target.value;
-    syncHeader();
-    renderHotspots();
-    renderMap();
-    pushStateToPython();
-    queueEvent('filter_change', { state: currentState });
+    handleStateChange(e.target.value);
   });
 
   const yearSelect = document.getElementById('year-select');
@@ -1743,13 +2404,8 @@ function wireEvents() {
     });
     stateMobile.value = currentState;
     stateMobile.addEventListener('change', (e) => {
-      currentState = e.target.value;
-      if (stateSelect) stateSelect.value = currentState;
-      syncHeader();
-      renderHotspots();
-      renderMap();
-      pushStateToPython();
-      queueEvent('filter_change', { state: currentState });
+      if (stateSelect) stateSelect.value = e.target.value;
+      handleStateChange(e.target.value);
     });
   }
 
@@ -1775,8 +2431,12 @@ function wireEvents() {
     btn.addEventListener('click', () => setDepth(btn.dataset.depth));
   });
 
-  document.querySelectorAll('.chip').forEach((btn) => {
+  document.querySelectorAll('.focus-section .chip').forEach((btn) => {
     btn.addEventListener('click', () => setFocus(btn.dataset.focus || 'All risk'));
+  });
+
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchMapMode(btn.dataset.mode || 'polygon'));
   });
 
   document.querySelectorAll('.layer-btn').forEach((btn) => {
@@ -1855,14 +2515,11 @@ function wireEvents() {
     openTour();
   });
 
-  document.getElementById('tour-restart-btn')?.addEventListener('click', () => {
-    tourIndex = 0;
-    openTour();
-  });
   document.getElementById('tour-skip-btn')?.addEventListener('click', () => closeTour(true));
   document.getElementById('tour-next-btn')?.addEventListener('click', () => {
-    if (tourIndex >= tourSteps.length - 1) {
+    if (tourIndex >= TOUR_STEPS.length - 1) {
       closeTour(true);
+      seedCompareFromHotspots();
       return;
     }
     tourIndex += 1;
@@ -1879,7 +2536,9 @@ function wireEvents() {
     if (!link) return;
 
     const rawHref = link.getAttribute('href') || '';
-    const parsed = new URL(rawHref, `${window.parent.location.origin}${window.parent.location.pathname}`);
+    const parentUrl = getAppStateBaseUrl();
+    const baseHref = parentUrl ? `${parentUrl.origin}${parentUrl.pathname}` : 'http://localhost/';
+    const parsed = new URL(rawHref, baseHref);
     const navUrl = new URL(parsed.href);
     if (testingMode) {
       navUrl.searchParams.set('testing', '1');
@@ -1896,26 +2555,48 @@ function wireEvents() {
   initBottomSheetDrag();
 }
 
+let appBooted = false;
+
+function bootApp() {
+  if (appBooted || bootstrappingLatestYear) return;
+  appBooted = true;
+  try {
+    wireEvents();
+    detectMobile();
+    window.addEventListener('resize', () => {
+      detectMobile();
+      queueMapResize(80);
+    });
+    window.addEventListener('load', () => queueMapResize(180), { once: true });
+    if (testingMode && testSession) {
+      pushStateToPython({ immediate: true });
+    }
+    syncHeader();
+    applyDepthVisibility();
+    renderHotspots();
+    renderCompareSlots();
+    switchMapMode(currentMapMode);
+    fitMapToCurrentState();
+    applyStateDimming();
+    maybeStartTour();
+
+    if (selectedLGA) {
+      openDrawer();
+      renderDetail();
+    }
+
+    scheduleBootOverlayHide(80);
+  } catch (err) {
+    reportBootError(err);
+  }
+}
+
 if (!bootstrappingLatestYear) {
-  wireEvents();
-  detectMobile();
-  window.addEventListener('resize', detectMobile);
-  if (testingMode && testSession) {
-    pushStateToPython({ immediate: true });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootApp, { once: true });
+  } else {
+    bootApp();
   }
-  syncHeader();
-  applyDepthVisibility();
-  renderHotspots();
-  renderCompareSlots();
-  renderMap();
-  maybeStartTour();
-
-  if (selectedLGA) {
-    openDrawer();
-    renderDetail();
-  }
-
-  scheduleBootOverlayHide(80);
 }
 
 document.addEventListener('keydown', (e) => {
@@ -1923,5 +2604,8 @@ document.addEventListener('keydown', (e) => {
   closeOverlay('share-drawer');
   closeOverlay('export-drawer');
   closeOverlay('mobile-more-drawer');
-  closeTour(false);
+  if (isTourOpen()) {
+    markTourComplete();
+    closeTour();
+  }
 });
