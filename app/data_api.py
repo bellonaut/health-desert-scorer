@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import geopandas as gpd
 import numpy as np
@@ -43,6 +45,7 @@ EXPECTED_COLUMNS = [
     "risk_score_total",
     "risk_score_facility_access",
     "risk_score_connectivity",
+    "risk_score_access_60min",
     "risk_score_mortality",
     "facilities_per_10k",
     "avg_distance_km",
@@ -63,6 +66,103 @@ EXPECTED_COLUMNS = [
     "primary_barriers",
     "recommendation",
 ]
+
+_DRIVER_BOUNDS: dict[str, tuple[float, float]] = {}
+
+
+def _update_driver_bounds(df: pd.DataFrame) -> None:
+    bounds: dict[str, tuple[float, float]] = {}
+    for col in (
+        "risk_score_mortality",
+        "risk_score_facility_access",
+        "risk_score_connectivity",
+        "risk_score_access_60min",
+        "u5_mortality_rate",
+        "u5mr_mean",
+        "facilities_per_10k",
+        "coverage_5km",
+        "connectivity_score",
+        "towers_per_10k",
+        "pop_pct_60min",
+    ):
+        if col not in df.columns:
+            continue
+        series = pd.to_numeric(df[col], errors="coerce").dropna()
+        if series.empty:
+            continue
+        min_v = float(series.min())
+        max_v = float(series.max())
+        if min_v == max_v:
+            continue
+        bounds[col] = (min_v, max_v)
+    global _DRIVER_BOUNDS
+    _DRIVER_BOUNDS = bounds
+
+
+def _first_not_none(*values: float | None) -> float | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _component_severity(row: Mapping[str, Any], *columns: str) -> float | None:
+    for col in columns:
+        value = _safe_float(row.get(col))
+        if value is None:
+            continue
+        bounds = _DRIVER_BOUNDS.get(col)
+        if bounds is not None and bounds[1] <= 1.0 and 0.0 <= value <= 1.0:
+            value *= 10.0
+        return max(0.0, min(10.0, value))
+    return None
+
+
+def _metric_severity(row: Mapping[str, Any], column: str, *, higher_is_worse: bool) -> float | None:
+    value = _safe_float(row.get(column))
+    if value is None:
+        return None
+
+    bounds = _DRIVER_BOUNDS.get(column)
+    if bounds is not None and bounds[1] > bounds[0]:
+        normalized = (value - bounds[0]) / (bounds[1] - bounds[0])
+    elif 0.0 <= value <= 100.0:
+        normalized = value / 100.0
+    elif 0.0 <= value <= 10.0:
+        normalized = value / 10.0
+    else:
+        return None
+
+    normalized = max(0.0, min(1.0, normalized))
+    if not higher_is_worse:
+        normalized = 1.0 - normalized
+    return normalized * 10.0
+
+
+def _worst_driver(row: Mapping[str, Any]) -> str:
+    candidates = {
+        "mortality critical": _first_not_none(
+            _component_severity(row, "risk_score_mortality"),
+            _metric_severity(row, "u5_mortality_rate", higher_is_worse=True),
+            _metric_severity(row, "u5mr_mean", higher_is_worse=True),
+        ),
+        "low facilities": _first_not_none(
+            _metric_severity(row, "facilities_per_10k", higher_is_worse=False),
+            _component_severity(row, "risk_score_facility_access"),
+        ),
+        "no coverage": _metric_severity(row, "coverage_5km", higher_is_worse=False),
+        "poor signal": _first_not_none(
+            _component_severity(row, "risk_score_connectivity"),
+            _metric_severity(row, "connectivity_score", higher_is_worse=False),
+            _metric_severity(row, "towers_per_10k", higher_is_worse=False),
+        ),
+        "no road access": _first_not_none(
+            _component_severity(row, "risk_score_access_60min"),
+            _metric_severity(row, "pop_pct_60min", higher_is_worse=False),
+        ),
+    }
+    scored = {label: score for label, score in candidates.items() if score is not None}
+    return max(scored, key=scored.get) if scored else ""
 
 
 def _slug(series: pd.Series) -> pd.Series:
@@ -176,6 +276,14 @@ def _temperature_scale(probs: pd.Series, temperature: float = 1.0) -> pd.Series:
     return softened
 
 
+def _synchronize_risk_scales(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep the 0-1 and 0-10 risk views aligned after any downstream transforms."""
+    risk = pd.to_numeric(df.get("risk_score"), errors="coerce").clip(0, 1)
+    df["risk_score"] = risk
+    df["risk_score_total"] = risk * 10.0
+    return df
+
+
 def _load_shap() -> pd.DataFrame | None:
     shap_path = PROCESSED_DIR / "shap_values.csv"
     if not shap_path.exists():
@@ -219,6 +327,7 @@ def load_backend_data(
                 "risk_score_total",
                 "risk_score_facility_access",
                 "risk_score_connectivity",
+                "risk_score_access_60min",
                 "risk_score_mortality",
                 "confidence_pct",
                 "confidence_reason_codes",
@@ -246,6 +355,7 @@ def load_backend_data(
     merged_features["risk_score"] = pd.to_numeric(merged_features["risk_score"], errors="coerce").clip(0, 1)
     if RISK_TEMPERATURE and RISK_TEMPERATURE != 1.0:
         merged_features["risk_score"] = _temperature_scale(merged_features["risk_score"], RISK_TEMPERATURE)
+    merged_features = _synchronize_risk_scales(merged_features)
 
     merged = boundaries.merge(merged_features, on=["lga_id"], how="left")
     if "lga_uid_x" in merged.columns or "lga_uid_y" in merged.columns:
@@ -310,6 +420,7 @@ def load_backend_data(
     merged["lga_uid"] = merged["lga_uid"].astype(str)
     merged["state_name"] = merged["state_name"].astype(str).str.strip()
     merged["lga_name"] = merged["lga_name"].astype(str).str.strip()
+    _update_driver_bounds(merged)
 
     merged = gpd.GeoDataFrame(merged)
     merged.attrs["boundary_resolution"] = boundaries.attrs.get("boundary_resolution", "raw")
@@ -373,18 +484,20 @@ def normalize_for_choropleth(gdf: gpd.GeoDataFrame, column: str) -> list[float]:
     """Return normalized 0-1 values for coloring, defaulting to 0.5 when missing."""
     series = pd.to_numeric(gdf[column], errors="coerce") if column in gdf.columns else pd.Series([], dtype=float)
     if series.empty or series.notna().sum() == 0:
-        return [0.5] * len(gdf)
+        return _safe_json([0.5] * len(gdf))
     min_v, max_v = series.min(), series.max()
     if min_v == max_v:
-        return [0.5] * len(gdf)
-    return [
-        float((val - min_v) / (max_v - min_v)) if pd.notna(val) else 0.5
-        for val in series.reindex(gdf.index, fill_value=np.nan)
-    ]
+        return _safe_json([0.5] * len(gdf))
+    return _safe_json(
+        [
+            float((val - min_v) / (max_v - min_v)) if pd.notna(val) else 0.5
+            for val in series.reindex(gdf.index, fill_value=np.nan)
+        ]
+    )
 
 
 def get_states(geo_df: pd.DataFrame) -> list[str]:
-    return sorted(geo_df["state_name"].dropna().astype(str).unique().tolist())
+    return _safe_json(sorted(geo_df["state_name"].dropna().astype(str).unique().tolist()))
 
 
 def get_lgas_geojson(
@@ -395,17 +508,48 @@ def get_lgas_geojson(
 ) -> str:
     filtered = filter_geo(geo_df, state_filter, year)
     columns = [c for c in columns if c in filtered.columns] + ["geometry"]
-    trimmed = filtered[columns]
-    return trimmed.to_crs(epsg=4326).to_json()
+    trimmed = filtered[columns].replace({np.nan: None})
+    geojson = json.loads(trimmed.to_crs(epsg=4326).to_json())
+    return json.dumps(_safe_json(geojson), allow_nan=False)
 
 
 def _safe_float(value: Any) -> float | None:
     try:
-        if value is None or (isinstance(value, float) and np.isnan(value)):
+        if value is None:
             return None
-        return float(value)
+        n = float(value)
+        if math.isnan(n) or math.isinf(n):
+            return None
+        return n
     except (TypeError, ValueError):
         return None
+
+
+def _safe_json(obj: Any) -> Any:
+    """Recursively replace NaN/Inf with None in nested dicts/lists."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        value = float(obj)
+        return None if math.isnan(value) or math.isinf(value) else value
+    if isinstance(obj, float):
+        return None if math.isnan(obj) or math.isinf(obj) else obj
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if obj is pd.NA or obj is pd.NaT:
+        return None
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat() if not pd.isnull(obj) else None
+    if isinstance(obj, np.datetime64):
+        ts = pd.Timestamp(obj)
+        return ts.isoformat() if not pd.isnull(ts) else None
+    if isinstance(obj, dict):
+        return {k: _safe_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_safe_json(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [_safe_json(v) for v in obj]
+    return obj
 
 
 def _cap_confidence(value: Any, cap: float = 90.0) -> float | None:
@@ -419,6 +563,16 @@ def _cap_confidence(value: Any, cap: float = 90.0) -> float | None:
     if n is None:
         return None
     return min(n, cap)
+
+
+def _risk_score_out_of_10(row: Mapping[str, Any]) -> float | None:
+    risk_total = _safe_float(row.get("risk_score_total"))
+    if risk_total is not None:
+        return risk_total
+    risk = _safe_float(row.get("risk_score"))
+    if risk is None:
+        return None
+    return risk * 10.0
 
 
 def get_ranked_hotspots(
@@ -437,29 +591,36 @@ def get_ranked_hotspots(
     ranked = ranked.reset_index(drop=True)
     hotspots: list[dict[str, Any]] = []
     for idx, row in ranked.iterrows():
+        row_dict = row.to_dict()
+        risk_score = _risk_score_out_of_10(row_dict)
         hotspots.append(
             {
                 "rank": int(idx + 1),
-                "id": str(row.get("lga_uid")),
-                "name": row.get("lga_name"),
-                "state": row.get("state_name"),
-                "risk": _safe_float(row.get("risk_score")),
-                "risk_total": _safe_float(row.get("risk_score_total")),
-                "fac": _safe_float(row.get("facilities_per_10k")),
-                "dist": _safe_float(row.get("avg_distance_km")),
-                "u5mr": _safe_float(row.get("u5mr_mean")),
-                "pop": _safe_float(row.get("population")),
-                "cov": _safe_float(row.get("coverage_5km")),
-                "pop_pct_60min": _safe_float(row.get("pop_pct_60min")),
-                "towers": _safe_float(row.get("towers_per_10k")),
-                "year": row.get("year"),
-                "confidence_pct": _cap_confidence(row.get("confidence_pct")),
-                "confidence_reason_codes": row.get("confidence_reason_codes"),
-                "primary_barriers": row.get("primary_barriers"),
-                "recommendation": row.get("recommendation"),
+                "id": str(row_dict.get("lga_uid")),
+                "lga_id": str(row_dict.get("lga_uid")),
+                "name": row_dict.get("lga_name"),
+                "lga_name": row_dict.get("lga_name"),
+                "state": row_dict.get("state_name"),
+                "state_name": row_dict.get("state_name"),
+                "risk": _safe_float(row_dict.get("risk_score")),
+                "risk_score": round(float(risk_score), 2) if risk_score is not None else None,
+                "risk_total": _safe_float(row_dict.get("risk_score_total")),
+                "fac": _safe_float(row_dict.get("facilities_per_10k")),
+                "dist": _safe_float(row_dict.get("avg_distance_km")),
+                "u5mr": _safe_float(row_dict.get("u5mr_mean")),
+                "pop": _safe_float(row_dict.get("population")),
+                "cov": _safe_float(row_dict.get("coverage_5km")),
+                "pop_pct_60min": _safe_float(row_dict.get("pop_pct_60min")),
+                "towers": _safe_float(row_dict.get("towers_per_10k")),
+                "year": row_dict.get("year"),
+                "confidence_pct": _cap_confidence(row_dict.get("confidence_pct")),
+                "confidence_reason_codes": row_dict.get("confidence_reason_codes"),
+                "primary_barriers": row_dict.get("primary_barriers"),
+                "recommendation": row_dict.get("recommendation"),
+                "worst_driver": _worst_driver(row_dict),
             }
         )
-    return hotspots
+    return _safe_json(hotspots)
 
 
 def get_lga_detail(
@@ -473,12 +634,15 @@ def get_lga_detail(
     if match.empty:
         return None
     row = match.iloc[0]
+    row_dict = row.to_dict()
+    risk_score = _risk_score_out_of_10(row_dict)
     shap_values = get_shap_values(shap_df, row.get("lga_name"), row.get("year"))
-    return {
+    result = {
         "id": str(row.get("lga_uid")),
         "name": row.get("lga_name"),
         "state": row.get("state_name"),
         "risk": _safe_float(row.get("risk_score")),
+        "risk_score": round(float(risk_score), 2) if risk_score is not None else None,
         "risk_total": _safe_float(row.get("risk_score_total")),
         "fac": _safe_float(row.get("facilities_per_10k")),
         "dist": _safe_float(row.get("avg_distance_km")),
@@ -493,8 +657,10 @@ def get_lga_detail(
         "confidence_reason_codes": row.get("confidence_reason_codes"),
         "primary_barriers": row.get("primary_barriers"),
         "recommendation": row.get("recommendation"),
+        "worst_driver": _worst_driver(row_dict),
         "shap": shap_values,
     }
+    return _safe_json(result)
 
 
 def get_shap_values(
@@ -518,4 +684,4 @@ def get_shap_values(
     if values.empty:
         return None
     values = values.reindex(values.abs().sort_values(ascending=False).index)
-    return {k: float(v) for k, v in values.head(top_n).items()}
+    return _safe_json({k: float(v) for k, v in values.head(top_n).items()})

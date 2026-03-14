@@ -7,7 +7,9 @@ from pathlib import Path
 import json
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 
 from src.models.score import score_lga
 
@@ -15,6 +17,34 @@ ROOT = Path(__file__).resolve().parents[2]
 SILVER = ROOT / "data" / "silver"
 GOLD = ROOT / "data" / "gold"
 MODEL_VERSION = "v1.3"
+
+
+def _rank_normalize_scores(df: pd.DataFrame, score_col: str = "risk_score_total") -> pd.DataFrame:
+    """
+    Spread raw model outputs within each year using percentile ranks.
+
+    The gold-layer contract in this repo treats `risk_score_total` as the
+    authoritative 0-10 score and `risk_score` as the derived 0-1 view used by
+    some app paths, so both columns are recomputed together after ranking.
+    """
+    normalized = df.copy()
+    if score_col not in normalized.columns:
+        raise KeyError(f"Missing score column for normalization: {score_col}")
+
+    normalized[score_col] = pd.to_numeric(normalized[score_col], errors="coerce").astype("float64")
+    for year in sorted(pd.Series(normalized["year"]).dropna().unique().tolist()):
+        mask = (normalized["year"] == year) & normalized[score_col].notna()
+        raw = normalized.loc[mask, score_col].to_numpy(dtype=float)
+        n = len(raw)
+        if n < 2:
+            continue
+        ranks = rankdata(raw, method="average")
+        scaled = (ranks - 1) / (n - 1) * 10.0
+        normalized.loc[mask, score_col] = np.round(scaled, 4)
+
+    normalized["risk_score"] = np.round(pd.to_numeric(normalized[score_col], errors="coerce") / 10.0, 6)
+    normalized["risk_score_total"] = np.round(normalized["risk_score"] * 10.0, 4)
+    return normalized
 
 
 def calculate_confidence(confidence_issues: str) -> int:
@@ -105,6 +135,7 @@ def build_gold_lga_risk() -> pd.DataFrame:
     df["confidence_reason_codes"] = df["confidence_issues"].fillna("none")
     df["confidence_pct"] = df["confidence_reason_codes"].apply(calculate_confidence)
     df["estimate_as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    df = _rank_normalize_scores(df)
 
     assert df["risk_score_total"].between(0, 10).all(), "Risk scores must be 0-10"
     assert not df["risk_score_total"].isna().any(), "No null risk scores allowed"
