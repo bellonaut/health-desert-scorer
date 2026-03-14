@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import geopandas as gpd
 import numpy as np
@@ -43,6 +43,7 @@ EXPECTED_COLUMNS = [
     "risk_score_total",
     "risk_score_facility_access",
     "risk_score_connectivity",
+    "risk_score_access_60min",
     "risk_score_mortality",
     "facilities_per_10k",
     "avg_distance_km",
@@ -63,6 +64,103 @@ EXPECTED_COLUMNS = [
     "primary_barriers",
     "recommendation",
 ]
+
+_DRIVER_BOUNDS: dict[str, tuple[float, float]] = {}
+
+
+def _update_driver_bounds(df: pd.DataFrame) -> None:
+    bounds: dict[str, tuple[float, float]] = {}
+    for col in (
+        "risk_score_mortality",
+        "risk_score_facility_access",
+        "risk_score_connectivity",
+        "risk_score_access_60min",
+        "u5_mortality_rate",
+        "u5mr_mean",
+        "facilities_per_10k",
+        "coverage_5km",
+        "connectivity_score",
+        "towers_per_10k",
+        "pop_pct_60min",
+    ):
+        if col not in df.columns:
+            continue
+        series = pd.to_numeric(df[col], errors="coerce").dropna()
+        if series.empty:
+            continue
+        min_v = float(series.min())
+        max_v = float(series.max())
+        if min_v == max_v:
+            continue
+        bounds[col] = (min_v, max_v)
+    global _DRIVER_BOUNDS
+    _DRIVER_BOUNDS = bounds
+
+
+def _first_not_none(*values: float | None) -> float | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _component_severity(row: Mapping[str, Any], *columns: str) -> float | None:
+    for col in columns:
+        value = _safe_float(row.get(col))
+        if value is None:
+            continue
+        bounds = _DRIVER_BOUNDS.get(col)
+        if bounds is not None and bounds[1] <= 1.0 and 0.0 <= value <= 1.0:
+            value *= 10.0
+        return max(0.0, min(10.0, value))
+    return None
+
+
+def _metric_severity(row: Mapping[str, Any], column: str, *, higher_is_worse: bool) -> float | None:
+    value = _safe_float(row.get(column))
+    if value is None:
+        return None
+
+    bounds = _DRIVER_BOUNDS.get(column)
+    if bounds is not None and bounds[1] > bounds[0]:
+        normalized = (value - bounds[0]) / (bounds[1] - bounds[0])
+    elif 0.0 <= value <= 100.0:
+        normalized = value / 100.0
+    elif 0.0 <= value <= 10.0:
+        normalized = value / 10.0
+    else:
+        return None
+
+    normalized = max(0.0, min(1.0, normalized))
+    if not higher_is_worse:
+        normalized = 1.0 - normalized
+    return normalized * 10.0
+
+
+def _worst_driver(row: Mapping[str, Any]) -> str:
+    candidates = {
+        "mortality critical": _first_not_none(
+            _component_severity(row, "risk_score_mortality"),
+            _metric_severity(row, "u5_mortality_rate", higher_is_worse=True),
+            _metric_severity(row, "u5mr_mean", higher_is_worse=True),
+        ),
+        "low facilities": _first_not_none(
+            _metric_severity(row, "facilities_per_10k", higher_is_worse=False),
+            _component_severity(row, "risk_score_facility_access"),
+        ),
+        "no coverage": _metric_severity(row, "coverage_5km", higher_is_worse=False),
+        "poor signal": _first_not_none(
+            _component_severity(row, "risk_score_connectivity"),
+            _metric_severity(row, "connectivity_score", higher_is_worse=False),
+            _metric_severity(row, "towers_per_10k", higher_is_worse=False),
+        ),
+        "no road access": _first_not_none(
+            _component_severity(row, "risk_score_access_60min"),
+            _metric_severity(row, "pop_pct_60min", higher_is_worse=False),
+        ),
+    }
+    scored = {label: score for label, score in candidates.items() if score is not None}
+    return max(scored, key=scored.get) if scored else ""
 
 
 def _slug(series: pd.Series) -> pd.Series:
@@ -219,6 +317,7 @@ def load_backend_data(
                 "risk_score_total",
                 "risk_score_facility_access",
                 "risk_score_connectivity",
+                "risk_score_access_60min",
                 "risk_score_mortality",
                 "confidence_pct",
                 "confidence_reason_codes",
@@ -310,6 +409,7 @@ def load_backend_data(
     merged["lga_uid"] = merged["lga_uid"].astype(str)
     merged["state_name"] = merged["state_name"].astype(str).str.strip()
     merged["lga_name"] = merged["lga_name"].astype(str).str.strip()
+    _update_driver_bounds(merged)
 
     merged = gpd.GeoDataFrame(merged)
     merged.attrs["boundary_resolution"] = boundaries.attrs.get("boundary_resolution", "raw")
@@ -421,6 +521,16 @@ def _cap_confidence(value: Any, cap: float = 90.0) -> float | None:
     return min(n, cap)
 
 
+def _risk_score_out_of_10(row: Mapping[str, Any]) -> float | None:
+    risk_total = _safe_float(row.get("risk_score_total"))
+    if risk_total is not None:
+        return risk_total
+    risk = _safe_float(row.get("risk_score"))
+    if risk is None:
+        return None
+    return risk * 10.0
+
+
 def get_ranked_hotspots(
     geo_df: pd.DataFrame,
     focus: str,
@@ -437,26 +547,33 @@ def get_ranked_hotspots(
     ranked = ranked.reset_index(drop=True)
     hotspots: list[dict[str, Any]] = []
     for idx, row in ranked.iterrows():
+        row_dict = row.to_dict()
+        risk_score = _risk_score_out_of_10(row_dict)
         hotspots.append(
             {
                 "rank": int(idx + 1),
-                "id": str(row.get("lga_uid")),
-                "name": row.get("lga_name"),
-                "state": row.get("state_name"),
-                "risk": _safe_float(row.get("risk_score")),
-                "risk_total": _safe_float(row.get("risk_score_total")),
-                "fac": _safe_float(row.get("facilities_per_10k")),
-                "dist": _safe_float(row.get("avg_distance_km")),
-                "u5mr": _safe_float(row.get("u5mr_mean")),
-                "pop": _safe_float(row.get("population")),
-                "cov": _safe_float(row.get("coverage_5km")),
-                "pop_pct_60min": _safe_float(row.get("pop_pct_60min")),
-                "towers": _safe_float(row.get("towers_per_10k")),
-                "year": row.get("year"),
-                "confidence_pct": _cap_confidence(row.get("confidence_pct")),
-                "confidence_reason_codes": row.get("confidence_reason_codes"),
-                "primary_barriers": row.get("primary_barriers"),
-                "recommendation": row.get("recommendation"),
+                "id": str(row_dict.get("lga_uid")),
+                "lga_id": str(row_dict.get("lga_uid")),
+                "name": row_dict.get("lga_name"),
+                "lga_name": row_dict.get("lga_name"),
+                "state": row_dict.get("state_name"),
+                "state_name": row_dict.get("state_name"),
+                "risk": _safe_float(row_dict.get("risk_score")),
+                "risk_score": round(float(risk_score), 2) if risk_score is not None else None,
+                "risk_total": _safe_float(row_dict.get("risk_score_total")),
+                "fac": _safe_float(row_dict.get("facilities_per_10k")),
+                "dist": _safe_float(row_dict.get("avg_distance_km")),
+                "u5mr": _safe_float(row_dict.get("u5mr_mean")),
+                "pop": _safe_float(row_dict.get("population")),
+                "cov": _safe_float(row_dict.get("coverage_5km")),
+                "pop_pct_60min": _safe_float(row_dict.get("pop_pct_60min")),
+                "towers": _safe_float(row_dict.get("towers_per_10k")),
+                "year": row_dict.get("year"),
+                "confidence_pct": _cap_confidence(row_dict.get("confidence_pct")),
+                "confidence_reason_codes": row_dict.get("confidence_reason_codes"),
+                "primary_barriers": row_dict.get("primary_barriers"),
+                "recommendation": row_dict.get("recommendation"),
+                "worst_driver": _worst_driver(row_dict),
             }
         )
     return hotspots

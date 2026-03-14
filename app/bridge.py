@@ -12,6 +12,7 @@ import streamlit as st
 
 from data_api import (
     FOCUS_COLUMN,
+    _worst_driver,
     filter_geo,
     get_lga_detail,
     get_lgas_geojson,
@@ -192,6 +193,10 @@ def _find_unserializable(obj: Any, path: str = "root") -> str | None:
         return f"{path} = {type(obj).__name__}({preview})"
 
 
+def _worst_driver_from_row(row: Mapping[str, Any]) -> str:
+    return _worst_driver(row)
+
+
 def _records_from_geo(
     filtered_df,
     include_shap: bool = False,
@@ -203,11 +208,28 @@ def _records_from_geo(
         lga_name = _coerce(getattr(row, "lga_name"))
         year_value = _coerce(getattr(row, "year", None))
         year_key = _year_key(year_value)
+        driver_source = {
+            "risk_score_mortality": _coerce(getattr(row, "risk_score_mortality", None)),
+            "risk_score_facility_access": _coerce(getattr(row, "risk_score_facility_access", None)),
+            "risk_score_connectivity": _coerce(getattr(row, "risk_score_connectivity", None)),
+            "risk_score_access_60min": _coerce(getattr(row, "risk_score_access_60min", None)),
+            "u5_mortality_rate": _coerce(getattr(row, "u5_mortality_rate", None)),
+            "u5mr_mean": _coerce(getattr(row, "u5mr_mean", None)),
+            "facilities_per_10k": _coerce(getattr(row, "facilities_per_10k", None)),
+            "coverage_5km": _coerce(getattr(row, "coverage_5km", None)),
+            "connectivity_score": _coerce(getattr(row, "connectivity_score", None)),
+            "towers_per_10k": _coerce(getattr(row, "towers_per_10k", None)),
+            "pop_pct_60min": _coerce(getattr(row, "pop_pct_60min", None)),
+        }
         rec: dict[str, Any] = {
             "id": str(getattr(row, "lga_uid")),
+            "lga_id": str(getattr(row, "lga_uid")),
             "name": lga_name,
+            "lga_name": lga_name,
             "state": _coerce(getattr(row, "state_name")),
+            "state_name": _coerce(getattr(row, "state_name")),
             "risk": _safe_float(getattr(row, "risk_score", None)),
+            "risk_score": _safe_float(getattr(row, "risk_score_total", None)),
             "risk_total": _safe_float(getattr(row, "risk_score_total", None)),
             "fac": _safe_float(getattr(row, "facilities_per_10k", None)),
             "dist": _safe_float(getattr(row, "avg_distance_km", None)),
@@ -223,6 +245,7 @@ def _records_from_geo(
             "primary_barriers": _coerce(getattr(row, "primary_barriers", None)),
             "recommendation": _coerce(getattr(row, "recommendation", None)),
         }
+        rec["worst_driver"] = _worst_driver_from_row(driver_source)
         if include_shap:
             by_year = shap_lookup.get((str(lga_name), year_key))
             rec["shap"] = by_year if by_year is not None else shap_lookup.get((str(lga_name), None))
@@ -240,6 +263,12 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
     filtered = filter_geo(geo_df, state_filter=state_filter, year=year)
+    geojson_source = filtered.copy()
+    if "worst_driver" not in geojson_source.columns:
+        geojson_source["worst_driver"] = geojson_source.apply(
+            lambda row: _worst_driver_from_row(row.to_dict()),
+            axis=1,
+        )
     # Always include SHAP for single-year views so client-side depth toggles
     # don't temporarily render stale records without attribution.
     include_shap = str(year).lower() != "both"
@@ -260,9 +289,9 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     ]
 
     if is_mobile:
-        geojson_columns = ("lga_uid",)
+        geojson_columns = ("lga_uid", "worst_driver")
     else:
-        geojson_columns = ("lga_uid", "lga_name", "state_name", "risk_score")
+        geojson_columns = ("lga_uid", "lga_name", "state_name", "risk_score", "risk_score_total", "worst_driver")
 
     payload: dict[str, Any] = {
         "meta": {
@@ -285,7 +314,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
         "selected": selected_detail,
         "map": {
             "geojson": get_lgas_geojson(
-                geo_df,
+                geojson_source,
                 state_filter=state_filter,
                 year=year,
                 columns=geojson_columns,

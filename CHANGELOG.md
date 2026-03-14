@@ -27,6 +27,8 @@ All notable changes to this project are documented in this file.
 - Fixed confidence display so hotspot and detail payloads no longer expose raw over-precise percentages.
 - Fixed state filtering so selecting a state fits to Nigerian state bounds and dims LGAs outside the selected state instead of zooming to an incorrect continental extent.
 - Fixed focus chips so map polygon colors now respond to the active risk dimension alongside the ranked list.
+- Fixed hotspot and tooltip driver tags so LGAs no longer default to `mortality critical` when facilities, connectivity, or road access are the dominant barrier.
+- Fixed hotspot payload aliases and score precision so the embedded Nigeria UI receives `lga_id`, `state_name`, `worst_driver`, and 2-decimal `risk_score` values consistently.
 
 ### Verification
 - `python -m src.data.build_features`
