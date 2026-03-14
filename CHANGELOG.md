@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 - Added routed travel-time coverage support across the pipeline, including `pop_pct_30min`, `pop_pct_60min`, `pop_pct_120min`, `pop_pct_within_60min`, and `pop_covered_60min`.
 - Added `60-min coverage` as an application focus option, detail metric, and export field.
 - Added confidence capping and confidence-band presentation in the application payload and UI.
+- Added vendored frontend runtime assets and a lightweight localhost file server so the embedded Nigeria app can load Leaflet, Turf, and export helpers reliably.
 
 ### Changed
 - Updated gold scoring to use model version `v1.3`.
@@ -20,6 +21,8 @@ All notable changes to this project are documented in this file.
 - Updated footer metadata to reference DHS 2013/2018/2024 and ORS isochrones.
 - Simplified the desktop header and upgraded the comparison modal for policy-facing review workflows.
 - Updated the Nigeria embedded UI with `Data / Map / Print` map modes, publishable polygon seams in data view, score-first detail rendering, and a four-step decision workflow tutorial.
+- Updated the Nigeria embed path to default to year `2024`, pass through the parent app route, and use lower-resolution boundaries on mobile or initial desktop load.
+- Updated gold risk outputs to rank-normalize `risk_score_total` within each year and keep `risk_score` synchronized as the 0-1 derivative.
 
 ### Fixed
 - Fixed DHS household recode alias handling for real HR inputs.
@@ -29,6 +32,8 @@ All notable changes to this project are documented in this file.
 - Fixed focus chips so map polygon colors now respond to the active risk dimension alongside the ranked list.
 - Fixed hotspot and tooltip driver tags so LGAs no longer default to `mortality critical` when facilities, connectivity, or road access are the dominant barrier.
 - Fixed hotspot payload aliases and score precision so the embedded Nigeria UI receives `lga_id`, `state_name`, `worst_driver`, and 2-decimal `risk_score` values consistently.
+- Fixed embedded payload serialization so NaN and Infinity values are sanitized across GeoJSON, detail payloads, and map values before HTML injection.
+- Fixed app-side score drift by re-synchronizing `risk_score_total` with `risk_score` after temperature scaling and by validating the score spread in gold contracts.
 
 ### Verification
 - `python -m src.data.build_features`

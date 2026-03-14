@@ -20,6 +20,7 @@ RISK_REQUIRED = {
     "state_id",
     "state_name",
     "year",
+    "risk_score",
     "risk_score_total",
     "risk_score_facility_access",
     "risk_score_connectivity",
@@ -50,6 +51,28 @@ def _require_cols(df: pd.DataFrame, required: set[str], label: str) -> None:
         raise AssertionError(f"{label}: missing required columns: {sorted(missing)}")
 
 
+def _check_score_distribution(df: pd.DataFrame) -> list[str]:
+    issues: list[str] = []
+    for year in sorted(pd.Series(df["year"]).dropna().unique().tolist()):
+        scores = pd.to_numeric(df.loc[df["year"] == year, "risk_score_total"], errors="coerce").dropna()
+        if len(scores) < 2:
+            continue
+        pct10 = float(scores.quantile(0.10))
+        pct90 = float(scores.quantile(0.90))
+        spread = pct90 - pct10
+        if spread < 5.0:
+            issues.append(
+                f"year={year}: risk_score_total spread (p10={pct10:.2f}, p90={pct90:.2f}) "
+                f"is only {spread:.2f} - expected >=5.0 after rank normalization"
+            )
+        median = float(scores.median())
+        print(
+            f"  year={year}: median={median:.3f}, p10={pct10:.3f}, "
+            f"p90={pct90:.3f}, spread={spread:.3f}, n={len(scores)}"
+        )
+    return issues
+
+
 def main() -> None:
     risk_path = GOLD_DIR / "gold_lga_risk.csv"
     explain_path = GOLD_DIR / "gold_lga_explain.csv"
@@ -64,6 +87,10 @@ def main() -> None:
 
     risk = pd.read_csv(risk_path)
     _require_cols(risk, RISK_REQUIRED, "gold_lga_risk")
+    synced_total = pd.to_numeric(risk["risk_score"], errors="coerce") * 10.0
+    sync_delta = (pd.to_numeric(risk["risk_score_total"], errors="coerce") - synced_total).abs().dropna()
+    if not sync_delta.empty and float(sync_delta.max()) > 1e-4:
+        raise AssertionError("risk_score_total must equal risk_score * 10 within tolerance")
     if not risk["risk_score_total"].between(0, 10).all():
         raise AssertionError("risk_score_total must be between 0 and 10")
     if not risk["confidence_pct"].between(0, 100).all():
@@ -79,6 +106,12 @@ def main() -> None:
     bad_years = counts_by_year[counts_by_year < MIN_ROWS_PER_YEAR]
     if not bad_years.empty:
         raise AssertionError(f"Each year must have at least {MIN_ROWS_PER_YEAR} rows. Found {bad_years.to_dict()}")
+    dist_issues = _check_score_distribution(risk)
+    if dist_issues:
+        for issue in dist_issues:
+            print(f"WARNING: {issue}")
+    else:
+        print("Score distribution: OK (spread >=5.0 for all years)")
     # Travel time: if present, validate range
     if "pop_pct_60min" in risk.columns:
         valid_tt = risk["pop_pct_60min"].dropna()

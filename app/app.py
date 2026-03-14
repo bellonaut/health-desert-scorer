@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlencode
 
 import streamlit as st
 
 from bridge import render_embedded_app
 from data_api import latest_year
+from server import start_file_server, write_and_get_url
 from utils.analytics import log_event
 from utils.error_handler import safe_execute, show_system_status
 
@@ -21,11 +25,12 @@ SESSION_DEFAULTS: Mapping[str, Any] = {
     "hd_focus": "All risk",
     "hd_selected_lga": None,
     "hd_compare_lgas": [],
-    "hd_year": "2018",
+    "hd_year": "2024",
     "hd_is_mobile": False,
     "hd_testing_mode": False,
     "hd_test_persona": "unknown",
     "hd_test_session": None,
+    "hd_parent_app_path": "/?app=ng",
 }
 
 PAGES_DIR = Path(__file__).resolve().parent / "pages"
@@ -100,6 +105,22 @@ def _file_mtime(path: Path) -> float:
         return path.stat().st_mtime
     except FileNotFoundError:
         return -1.0
+
+
+def _build_parent_app_path(route: str) -> str:
+    params = _get_query_params()
+    route_params: dict[str, str] = {}
+    if route == "ng":
+        route_params["app"] = "ng"
+    elif route == "global":
+        route_params["app"] = "global"
+
+    for key in ("testing", "persona", "session"):
+        if key in params:
+            route_params[key] = _last_param_value(params[key])
+
+    query = urlencode(route_params)
+    return f"/?{query}" if query else "/"
 
 
 def _hydrate_from_query_params() -> None:
@@ -363,6 +384,13 @@ def _cached_load(
     )
 
 
+@st.cache_resource
+def get_serve_dir() -> Path:
+    serve_dir = Path(tempfile.mkdtemp(prefix="hds_serve_"))
+    start_file_server(serve_dir)
+    return serve_dir
+
+
 def main() -> None:
     st.set_page_config(
         page_title="HEALTHDESERT",
@@ -381,6 +409,7 @@ def main() -> None:
         return
 
     _hydrate_from_query_params()
+    st.session_state["hd_parent_app_path"] = _build_parent_app_path(route)
 
     with st.sidebar:
         st.markdown("### Transparency")
@@ -394,7 +423,7 @@ def main() -> None:
     def _load() -> tuple[Any, Any]:
         return _cached_load(
             source_mode="gold_first",
-            boundary_resolution="auto",
+            boundary_resolution="low" if is_mobile else "medium",
             is_mobile=is_mobile,
             zoom=None,
             shap_values_mtime=_file_mtime(SHAP_VALUES_PATH),
@@ -408,7 +437,11 @@ def main() -> None:
     if st.session_state.get("hd_year") is None:
         st.session_state["hd_year"] = latest_year(geo_df)
 
-    render_embedded_app(geo_df, shap_df, st.session_state)
+    get_serve_dir()
+    html = render_embedded_app(geo_df, shap_df, st.session_state)
+    version = hashlib.sha1(html.encode("utf-8")).hexdigest()[:12]
+    url = write_and_get_url(html, filename="app.html")
+    st.components.v1.iframe(f"{url}?v={version}", height=10000, scrolling=False)
     show_system_status(
         data_last_updated=geo_df.attrs.get("data_last_updated"),
         model_version=geo_df.attrs.get("model_version"),

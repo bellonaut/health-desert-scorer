@@ -22,6 +22,7 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from bridge import _json_default, build_payload  # noqa: E402
+from data_api import _synchronize_risk_scales  # noqa: E402
 
 
 class _Opaque:
@@ -108,3 +109,18 @@ def test_full_payload_serializable(sample_geo_df, sample_shap_df, sample_session
     """End-to-end: build_payload must produce JSON-serializable output."""
     payload = build_payload(sample_geo_df, sample_shap_df, sample_session)
     json.dumps(payload, default=_json_default)
+
+
+def test_synchronize_risk_scales_keeps_total_in_sync() -> None:
+    df = pd.DataFrame(
+        {
+            "risk_score": [0.954726, 0.058751, np.nan],
+            "risk_score_total": [9.977563, 0.03881, 4.2],
+        }
+    )
+
+    synced = _synchronize_risk_scales(df.copy())
+
+    assert synced.loc[0, "risk_score_total"] == pytest.approx(9.54726)
+    assert synced.loc[1, "risk_score_total"] == pytest.approx(0.58751)
+    assert pd.isna(synced.loc[2, "risk_score_total"])
