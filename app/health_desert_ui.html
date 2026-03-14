@@ -4,13 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nigeria Health Desert Risk Scorer</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.css">
-<script src="https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.6.0/Control.FullScreen.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <!-- APP_STYLE -->
 <!-- DATA_INJECTION -->
 </head>
@@ -22,53 +16,37 @@
 
 <div class="app-shell">
 
-<header>
-  <div class="logo">HEALTH<span>DESERT</span> · NG</div>
-  <div class="header-divider" aria-hidden="true"></div>
-  <div class="header-desktop-controls">
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <span class="icon meta-icon">STATE</span>
-      <select id="state-select" class="state-select" aria-label="Select state"></select>
-    </div>
-
-    <div class="state-pill year-pill">
-      <span class="pill-dot"></span>
-      <span class="icon meta-icon">YEAR</span>
-      <select id="year-select" class="year-select" aria-label="Select year">
-        <option value="2024">2024</option>
-        <option value="2018">2018</option>
-        <option value="2013">2013</option>
-        <option value="Both">Both (avg)</option>
-      </select>
-    </div>
-
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <button type="button" class="meta-link-btn" id="share-open-btn">Share</button>
-    </div>
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <button type="button" class="meta-link-btn" id="export-open-btn">Export</button>
-    </div>
-    <div class="state-pill">
-      <span class="pill-dot"></span>
-      <button type="button" class="meta-link-btn" id="desktop-more-btn" aria-label="More options">&#8942; More</button>
-    </div>
+<header class="app-header">
+  <div class="header-wordmark wordmark">HEALTH<span class="header-accent accent">DESERT</span><sub class="header-sub">&middot; NG</sub></div>
+  <div class="header-divider"></div>
+  <div class="header-ctrl" id="state-ctrl">
+    <span class="ctrl-label">STATE</span>
+    <span class="ctrl-val" id="state-display">All Nigeria</span>
+    <span class="ctrl-caret">&#9662;</span>
+    <select id="state-select" class="header-native-select state-select" aria-label="Select state"></select>
   </div>
-
-  <div id="dataset-meta" class="dataset-meta">
-    <span id="dataset-meta-text">774 LGAs · 2024</span>
-    <span id="apply-status" class="status-pill"><span class="status-dot"></span>Ready</span>
+  <div class="header-ctrl" id="year-ctrl">
+    <span class="ctrl-label">YEAR</span>
+    <span class="ctrl-val ctrl-accent" id="year-display">2024</span>
+    <span class="ctrl-caret ctrl-accent">&#9662;</span>
+    <select id="year-select" class="header-native-select year-select" aria-label="Select year">
+      <option value="2024">2024</option>
+      <option value="2018">2018</option>
+      <option value="2013">2013</option>
+      <option value="Both">Both (avg)</option>
+    </select>
   </div>
-
-  <div class="depth-toggle">
-    <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">OVERVIEW</button>
-    <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
+  <div class="header-spacer"></div>
+  <div class="header-status">
+    <div class="status-dot"></div>
+    <span id="lga-count">774</span> LGAs &middot; <span id="apply-status-text">ready</span>
   </div>
-
+  <div class="header-divider"></div>
+  <button class="header-btn" id="share-open-btn">Share</button>
+  <button class="header-btn header-btn-accent" id="export-open-btn">Export &#8595;</button>
   <button type="button" class="mobile-more-btn" id="mobile-more-btn"
           aria-label="More options" title="More">&#8942;</button>
+  <button type="button" id="desktop-more-btn" hidden aria-hidden="true" tabindex="-1"></button>
 </header>
 
 <div class="res-note">Tip: tap any LGA on the map to see details</div>
@@ -77,21 +55,25 @@
   <div class="left-panel" id="filters" role="region" aria-label="Filters and results">
     <div class="panel-scroll" id="panel-scroll">
       <div class="question-bar">
-        <span class="q-icon">⌕</span>
+        <span class="q-icon">&#8981;</span>
         <input type="text" placeholder="Search for an LGA" id="search-input" aria-label="Search LGA">
       </div>
 
-      <div class="section-label">Focus <span class="help-icon" data-help="Choose a barrier focus to rank LGAs on a specific access constraint.">?</span></div>
-      <div class="filter-chips">
-        <button type="button" class="chip active" data-focus="All risk" aria-pressed="true">All risk</button>
-        <button type="button" class="chip" data-focus="Child mortality" aria-pressed="false">Child mortality</button>
-        <button type="button" class="chip" data-focus="Facility access" aria-pressed="false">Facility access</button>
-        <button type="button" class="chip" data-focus="Connectivity" aria-pressed="false">Connectivity</button>
-        <button type="button" class="chip" data-focus="5km coverage" aria-pressed="false">5km coverage</button>
-        <button type="button" class="chip" data-focus="60-min coverage" aria-pressed="false">60-min coverage</button>
+      <div class="focus-section">
+        <div class="focus-label">RISK DIMENSION</div>
+        <div class="chips-row chips-primary">
+          <button type="button" class="chip chip-sel" data-focus="All risk" aria-pressed="true">All risk</button>
+          <button type="button" class="chip" data-focus="Child mortality" aria-pressed="false">Mortality</button>
+          <button type="button" class="chip" data-focus="Facility access" aria-pressed="false">Facilities</button>
+        </div>
+        <div class="chips-row chips-secondary">
+          <button type="button" class="chip chip-sm" data-focus="Connectivity" aria-pressed="false">Connectivity</button>
+          <button type="button" class="chip chip-sm" data-focus="5km coverage" aria-pressed="false">5km access</button>
+          <button type="button" class="chip chip-sm" data-focus="60-min coverage" aria-pressed="false">60-min drive</button>
+        </div>
       </div>
 
-      <div class="section-label">Highest-need list · <span id="focus-scope">Nigeria</span> <span class="help-icon" data-help="Ranked by the selected focus. This highlights access barriers, not blame.">?</span></div>
+      <div class="section-label">Highest-need list &middot; <span id="focus-scope">Nigeria</span> <span class="help-icon" data-help="Ranked by the selected focus. This highlights access barriers, not blame.">?</span></div>
       <div class="hotspot-list" id="hotspot-list"></div>
     </div>
 
@@ -114,6 +96,10 @@
 
   <div class="map-area" id="results" role="region" aria-label="Map and layers">
     <div id="map-leaflet" class="map-leaflet"></div>
+    <div class="depth-toggle depth-toggle-desktop" aria-label="View depth">
+      <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
+      <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
+    </div>
     <div class="depth-toggle depth-toggle-mobile" aria-label="View depth">
       <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
       <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
@@ -147,19 +133,33 @@
     </div>
 
     <div class="map-legend">
-      <div class="legend-title">Risk score</div>
-      <div class="legend-gradient"></div>
-      <div class="legend-labels"><span>Lower</span><span>Higher</span></div>
-      <div class="legend-row"><div class="legend-dot legend-dot-green"></div><span>Better / lower risk</span></div>
-      <div class="legend-row"><div class="legend-dot legend-dot-yellow"></div><span>Medium</span></div>
-      <div class="legend-row"><div class="legend-dot legend-dot-red"></div><span>Worse / higher risk</span></div>
+      <div style="font-family:'IBM Plex Mono',monospace">
+        <div style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#4b5563;margin-bottom:6px">RISK SCORE</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+          <div style="width:90px;height:6px;border-radius:3px;background:linear-gradient(to right,#2166ac,#aec4d6,#e8a49a,#d73027)"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:8px;color:#6b7280;width:90px">
+          <span>0</span><span style="color:#9ca3af">5.5</span><span>10</span>
+        </div>
+        <div style="margin-top:6px;font-size:8px;color:#4b5563">
+          <span style="color:#2166ac">■</span> Better / lower risk<br>
+          <span style="color:#9ca3af">■</span> Near median<br>
+          <span style="color:#d73027">■</span> Worse / higher risk
+        </div>
+      </div>
+    </div>
+
+    <div class="map-mode-toggle" id="map-mode-toggle">
+      <button type="button" class="mode-btn active" data-mode="polygon">Data</button>
+      <button type="button" class="mode-btn" data-mode="dark">Map</button>
+      <button type="button" class="mode-btn" data-mode="print">Print</button>
     </div>
 
     <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
     <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
     <div class="map-credit">made by bashir aminu bello 2026</div>
 
-    <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 · NHFR · ORS isochrones · OpenCellID · Model v1.3</div>
+    <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 &middot; NHFR &middot; ORS isochrones &middot; OpenCellID &middot; Model v1.3</div>
   </div>
 </div>
 
@@ -172,7 +172,7 @@
         <div class="drawer-title">Share this view</div>
         <div class="drawer-subtitle">Copy the link or share via social apps.</div>
       </div>
-      <button type="button" class="close-btn" id="share-close-btn" aria-label="Close share panel">×</button>
+      <button type="button" class="close-btn" id="share-close-btn" aria-label="Close share panel">&times;</button>
     </div>
     <div class="drawer-body">
       <div class="share-url" id="share-url"></div>
@@ -193,7 +193,7 @@
         <div class="drawer-title">Export data</div>
         <div class="drawer-subtitle">Download data for reports, GIS tools, or planning.</div>
       </div>
-      <button type="button" class="close-btn" id="export-close-btn" aria-label="Close export panel">×</button>
+      <button type="button" class="close-btn" id="export-close-btn" aria-label="Close export panel">&times;</button>
     </div>
     <div class="drawer-body">
       <div class="export-options">

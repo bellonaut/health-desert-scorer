@@ -19,11 +19,14 @@ All notable changes to this project are documented in this file.
 - Updated `Both` aggregation so the displayed year remains `Both` rather than a numeric average.
 - Updated footer metadata to reference DHS 2013/2018/2024 and ORS isochrones.
 - Simplified the desktop header and upgraded the comparison modal for policy-facing review workflows.
+- Updated the Nigeria embedded UI with `Data / Map / Print` map modes, publishable polygon seams in data view, score-first detail rendering, and a four-step decision workflow tutorial.
 
 ### Fixed
 - Fixed DHS household recode alias handling for real HR inputs.
 - Fixed model serialization so `src.models.score.score_lga(..., version=\"v1.3\")` resolves correctly.
 - Fixed confidence display so hotspot and detail payloads no longer expose raw over-precise percentages.
+- Fixed state filtering so selecting a state fits to Nigerian state bounds and dims LGAs outside the selected state instead of zooming to an incorrect continental extent.
+- Fixed focus chips so map polygon colors now respond to the active risk dimension alongside the ranked list.
 
 ### Verification
 - `python -m src.data.build_features`
