@@ -34,6 +34,7 @@ All notable changes to this project are documented in this file.
 - Fixed hotspot payload aliases and score precision so the embedded Nigeria UI receives `lga_id`, `state_name`, `worst_driver`, and 2-decimal `risk_score` values consistently.
 - Fixed embedded payload serialization so NaN and Infinity values are sanitized across GeoJSON, detail payloads, and map values before HTML injection.
 - Fixed app-side score drift by re-synchronizing `risk_score_total` with `risk_score` after temperature scaling and by validating the score spread in gold contracts.
+- Fixed Streamlit Cloud deployment routing so the Nigeria app no longer loads its embed shell from a browser-local `127.0.0.1` iframe target.
 
 ### Verification
 - `python -m src.data.build_features`
