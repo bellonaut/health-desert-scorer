@@ -676,7 +676,7 @@ function syncHeader() {
   if (footnote) {
     const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version;
     const updated = meta.data_last_updated ? `Updated ${meta.data_last_updated}` : 'Update date unknown';
-    footnote.textContent = `DHS 2013/2018/2024 · NHFR · ORS isochrones · OpenCellID · Model ${modelVersion || 'v1.3'} · ${updated}`;
+    footnote.textContent = `DHS 2013/2018/2024 · NHFR · ORS isochrones · OpenCellID · Model ${modelVersion || 'v1.4'} · ${updated}`;
   }
 
   const resNote = document.querySelector('.res-note');
@@ -1220,7 +1220,7 @@ function renderDetail() {
 
   const modelVersion = Array.isArray(meta.model_version)
     ? meta.model_version.join(', ')
-    : (meta.model_version || 'v1.2');
+    : (meta.model_version || 'v1.4');
   const metaHtml = isResearch
     ? `
       <div class="research-section research-meta">
@@ -2030,7 +2030,7 @@ function closeOverlay(id) {
 }
 
 function buildExportMetadata() {
-  const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version || 'v1.2';
+  const modelVersion = Array.isArray(meta.model_version) ? meta.model_version.join(', ') : meta.model_version || 'v1.4';
   const updated = meta.data_last_updated || 'Unknown';
   return [
     '# Health Desert Scorer - Data Export',
@@ -2097,7 +2097,7 @@ function buildGeoJsonExport() {
   const metadata = {
     export_date: new Date().toISOString(),
     filters: { state: currentState, year: currentYear, focus: currentFocus },
-    model_version: meta.model_version || 'v1.2',
+    model_version: meta.model_version || 'v1.4',
   };
   const features = gj.features.map((f) => {
     const id = String(f.properties?.lga_uid ?? f.properties?.lga_name ?? '');

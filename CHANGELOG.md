@@ -5,6 +5,8 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added versioned model artifact output for `models/risk_model_v1.4/`, including `metadata.json` and `MODEL_CARD.md`.
+- Added a two-stage Nigeria scoring strategy that keeps a shared all-year base model and applies routed `pop_pct_60min` recalibration to 2024 only.
 - Added DHS 2024 as a third year across feature generation, silver outputs, gold outputs, and app year selectors.
 - Added mock 2024 DHS KR and HR CSV fallbacks for local bootstrap workflows in `scripts/create_mock_dhs.py`.
 - Added versioned model artifact output support for `models/risk_model_v1.3/`.
@@ -14,6 +16,8 @@ All notable changes to this project are documented in this file.
 - Added vendored frontend runtime assets and a lightweight localhost file server so the embedded Nigeria app can load Leaflet, Turf, and export helpers reliably.
 
 ### Changed
+- Updated gold scoring to load `risk_model_v1.4` and request required features from the artifact rather than relying on a hard-coded feature list.
+- Updated the Methodology page and embedded UI defaults to surface model version `v1.4`.
 - Updated gold scoring to use model version `v1.3`.
 - Updated training to use all three DHS years with temporal validation holding out 2024.
 - Updated year selectors to `2024`, `2018`, `2013`, and `Both (avg)`.
@@ -25,6 +29,9 @@ All notable changes to this project are documented in this file.
 - Updated gold risk outputs to rank-normalize `risk_score_total` within each year and keep `risk_score` synchronized as the 0-1 derivative.
 
 ### Fixed
+- Fixed v1.3-style evaluation leakage by replacing the old binary mortality-threshold training objective with an honest continuous two-stage scoring workflow for v1.4.
+- Fixed `risk_score_access_60min` so 2013/2018 rows fall back row-wise to `coverage_5km` instead of being treated as zero-access whenever 2024 routed coverage exists.
+- Fixed the release rebuild handoff so corrected travel-time coverage reaches `processed`, `bronze`, `silver`, and `gold` consistently before retraining.
 - Fixed DHS household recode alias handling for real HR inputs.
 - Fixed model serialization so `src.models.score.score_lga(..., version=\"v1.3\")` resolves correctly.
 - Fixed confidence display so hotspot and detail payloads no longer expose raw over-precise percentages.
@@ -36,6 +43,7 @@ All notable changes to this project are documented in this file.
 - Fixed app-side score drift by re-synchronizing `risk_score_total` with `risk_score` after temperature scaling and by validating the score spread in gold contracts.
 
 ### Verification
+- `python -m src.models.train_models`
 - `python -m src.data.build_features`
 - `python -m src.data.migrate_release_data`
 - `python -m src.data.build_silver`

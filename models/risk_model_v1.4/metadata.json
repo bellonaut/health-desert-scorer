@@ -1,0 +1,34 @@
+{
+  "model_version": "v1.4",
+  "strategy": "two_stage",
+  "stage1_features": [
+    "facilities_per_10k",
+    "avg_distance_km",
+    "u5mr_mean",
+    "coverage_5km",
+    "towers_per_10k",
+    "population_density"
+  ],
+  "stage2_features": [
+    "pop_pct_60min"
+  ],
+  "years_with_stage2": [
+    2024
+  ],
+  "pop_pct_60min_coverage": {
+    "2013": 0,
+    "2018": 0,
+    "2024": 774
+  },
+  "trained_at": "2026-03-24T11:47:41.714352+00:00",
+  "holdout_year": 2024,
+  "train_years": [
+    2013,
+    2018
+  ],
+  "evaluation_protocol": "stage1 temporal holdout on 2024; stage2 5-fold OOF recalibration on 2024 residuals",
+  "target_notes": {
+    "stage1": "Weighted per-year rank blend of mortality, facilities, distance, 5km coverage, connectivity, and density.",
+    "stage2": "2024-only routed-access residual adjustment using pop_pct_60min."
+  }
+}
