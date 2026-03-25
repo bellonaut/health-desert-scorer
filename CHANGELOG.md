@@ -54,6 +54,7 @@ All notable changes to this project are documented in this file.
 - Updated year selectors to `2024`, `2018`, `2013`, and `Both (avg)`.
 - Updated `Both` aggregation so the displayed year remains `Both` rather than a numeric average.
 - Updated footer metadata to reference DHS 2013/2018/2024 and ORS isochrones.
+- Updated landing page rollout stats to reflect three DHS survey waves.
 - Simplified the desktop header and upgraded the comparison modal for policy-facing review workflows.
 - Updated the Nigeria embedded UI with `Data / Map / Print` map modes, publishable polygon seams in data view, score-first detail rendering, and a four-step decision workflow tutorial.
 - Updated the Nigeria embed path to default to year `2024`, pass through the parent app route, and use lower-resolution boundaries on mobile or initial desktop load.
@@ -72,6 +73,8 @@ All notable changes to this project are documented in this file.
 - Fixed hotspot payload aliases and score precision so the embedded Nigeria UI receives `lga_id`, `state_name`, `worst_driver`, and 2-decimal `risk_score` values consistently.
 - Fixed embedded payload serialization so NaN and Infinity values are sanitized across GeoJSON, detail payloads, and map values before HTML injection.
 - Fixed app-side score drift by re-synchronizing `risk_score_total` with `risk_score` after temperature scaling and by validating the score spread in gold contracts.
+- Fixed Streamlit Cloud deployment routing so the Nigeria app no longer loads its embed shell from a browser-local `127.0.0.1` iframe target.
+- Fixed top-right map controls so `Data / Map / Print`, `MAP / RESEARCH`, and `View map as table` no longer overlap on the deployed Nigeria UI.
 
 ### Verification
 - `python -m src.models.train_models`
