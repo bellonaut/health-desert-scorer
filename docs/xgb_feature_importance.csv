@@ -1,7 +1,8 @@
 feature,importance
-u5mr_mean,0.90580547
-towers_per_10k,0.046073373
-population_density,0.019376656
-coverage_5km,0.01297209
-facilities_per_10k,0.012814755
-avg_distance_km,0.0029576523
+u5mr_mean,0.8473789691925049
+facilities_per_10k,0.6115702390670776
+avg_distance_km,0.41818472743034363
+pop_pct_60min,0.3160058727715837
+towers_per_10k,0.22337959706783295
+coverage_5km,0.20215794444084167
+population_density,0.0960758626461029

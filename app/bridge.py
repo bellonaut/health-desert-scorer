@@ -23,6 +23,7 @@ from data_api import (
     get_ranked_hotspots,
     get_states,
     latest_year,
+    load_backend_data,
     normalize_for_choropleth,
 )
 
@@ -352,7 +353,8 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     compare_lgas = [str(uid) for uid in session_state.get("hd_compare_lgas", [])]
 
     filtered = filter_geo(geo_df, state_filter=state_filter, year=year)
-    geojson_source = filtered.copy()
+    map_source = filter_geo(geo_df, state_filter=None, year=year)
+    geojson_source = map_source.copy()
     if "worst_driver" not in geojson_source.columns:
         geojson_source["worst_driver"] = geojson_source.apply(
             lambda row: _worst_driver_from_row(row.to_dict()),
@@ -362,7 +364,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     # don't temporarily render stale records without attribution.
     include_shap = str(year).lower() != "both"
     lga_records = _records_from_geo(
-        filtered,
+        map_source,
         include_shap=include_shap,
         shap_df=shap_df if include_shap else None,
     )
@@ -371,7 +373,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
     shap_allowed = str(year).lower() != "both"
     selected_detail = get_lga_detail(geo_df, shap_df if shap_allowed else None, selected_lga, year=year) if selected_lga else None
 
-    risk_norm = normalize_for_choropleth(filtered, "risk_score")
+    risk_norm = normalize_for_choropleth(map_source, "risk_score")
     map_values = [
         _sanitize_record({"id": rec["id"], "risk_norm": risk_norm[idx], "risk": rec["risk"]})
         for idx, rec in enumerate(lga_records)
@@ -402,7 +404,7 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
         "map": {
             "geojson": get_lgas_geojson(
                 geojson_source,
-                state_filter=state_filter,
+                state_filter=None,
                 year=year,
                 columns=geojson_columns,
             ),
@@ -410,6 +412,38 @@ def build_payload(geo_df, shap_df, session_state: Mapping[str, Any]) -> dict[str
         },
     }
     return payload
+
+
+def get_map_data(
+    year: str | int | None = None,
+    state: str | None = None,
+    focus: str = "All risk",
+) -> dict[str, Any]:
+    geo_df, shap_df = load_backend_data(boundary_resolution="low", is_mobile=True)
+    payload = build_payload(
+        geo_df,
+        shap_df,
+        {
+            "hd_year": year if year is not None else latest_year(geo_df),
+            "hd_state_filter": state or "All Nigeria",
+            "hd_focus": focus,
+            "hd_depth": 0,
+            "hd_compare_lgas": [],
+        },
+    )
+
+    geojson_raw = payload.get("map", {}).get("geojson") or {"type": "FeatureCollection", "features": []}
+    geojson = json.loads(geojson_raw) if isinstance(geojson_raw, str) else geojson_raw
+    record_by_id = {str(rec.get("id") or rec.get("lga_id")): rec for rec in payload.get("lgas", [])}
+
+    for feature in geojson.get("features", []):
+        props = dict(feature.get("properties") or {})
+        feature_id = str(props.get("lga_uid") or props.get("id") or props.get("lga_id") or "")
+        if feature_id and feature_id in record_by_id:
+            props.update(record_by_id[feature_id])
+        feature["properties"] = props
+
+    return geojson
 
 
 def inject_data_to_html(html_path: Path, data: dict[str, Any]) -> str:

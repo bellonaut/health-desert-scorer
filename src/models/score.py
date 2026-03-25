@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
 MODELS_ROOT = Path("models")
 
 
-def load_model(version: str = "v1.2"):
+def load_model(version: str = "v1.4"):
     """Load a versioned model artifact from models/risk_model_<version>/model.joblib."""
     if joblib is None:
         raise ImportError("joblib is required to load model artifacts")
@@ -25,7 +25,7 @@ def load_model(version: str = "v1.2"):
     return joblib.load(model_path)
 
 
-def get_required_features(version: str = "v1.2") -> list[str]:
+def get_required_features(version: str = "v1.4") -> list[str]:
     """Return the ordered feature list expected by model version."""
     feature_path = MODELS_ROOT / f"risk_model_{version}" / "feature_importance.csv"
     if not feature_path.exists():
@@ -36,7 +36,7 @@ def get_required_features(version: str = "v1.2") -> list[str]:
     return feature_df["feature"].dropna().astype(str).tolist()
 
 
-def score_lga(features: pd.DataFrame, version: str = "v1.2") -> pd.DataFrame:
+def score_lga(features: pd.DataFrame, version: str = "v1.4") -> pd.DataFrame:
     """Score LGAs and return model metadata with predictions."""
     required_features = get_required_features(version)
     missing = sorted(set(required_features) - set(features.columns))

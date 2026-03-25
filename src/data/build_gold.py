@@ -11,12 +11,12 @@ import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 
-from src.models.score import score_lga
+from src.models.score import get_required_features, score_lga
 
 ROOT = Path(__file__).resolve().parents[2]
 SILVER = ROOT / "data" / "silver"
 GOLD = ROOT / "data" / "gold"
-MODEL_VERSION = "v1.3"
+MODEL_VERSION = "v1.4"
 
 
 def _rank_normalize_scores(df: pd.DataFrame, score_col: str = "risk_score_total") -> pd.DataFrame:
@@ -64,11 +64,11 @@ def _component_scores(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
     out["risk_score_facility_access"] = (10 - (df["facilities_per_10k"].fillna(0).clip(0, 10))).clip(0, 10)
     out["risk_score_connectivity"] = (10 - (df["coverage_5km"].fillna(0) / 10)).clip(0, 10)
-    # Use routed 60-min coverage if available, fall back to straight-line 5km coverage
-    if "pop_pct_60min" in df.columns and df["pop_pct_60min"].notna().mean() > 0.3:
-        out["risk_score_access_60min"] = (10 - (df["pop_pct_60min"].fillna(0) / 10)).clip(0, 10)
-    else:
-        out["risk_score_access_60min"] = out["risk_score_connectivity"].copy()
+    # Use routed 60-min coverage when present, otherwise fall back row-wise to straight-line 5km coverage.
+    routed = pd.to_numeric(df["pop_pct_60min"], errors="coerce") if "pop_pct_60min" in df.columns else pd.Series(np.nan, index=df.index)
+    fallback_cov = pd.to_numeric(df["coverage_5km"], errors="coerce").fillna(0)
+    effective_cov = routed.where(routed.notna(), fallback_cov)
+    out["risk_score_access_60min"] = (10 - (effective_cov.fillna(0) / 10)).clip(0, 10)
     out["risk_score_mortality"] = (df["u5mr_mean"].fillna(0) / 20).clip(0, 10)
     return out
 
@@ -100,16 +100,11 @@ def build_gold_lga_risk() -> pd.DataFrame:
         for col in ["pop_pct_30min", "pop_pct_60min", "pop_pct_within_60min"]:
             df[col] = float("nan")
 
-    feature_cols = [
-        "facilities_per_10k",
-        "avg_distance_km",
-        "u5mr_mean",
-        "coverage_5km",
-        "towers_per_10k",
-        "population_density",
-    ]
-
     try:
+        feature_cols = get_required_features(MODEL_VERSION)
+        for col in feature_cols:
+            if col not in df.columns:
+                df[col] = np.nan
         model_scores = score_lga(df[feature_cols], version=MODEL_VERSION)
         df["risk_score_total"] = pd.to_numeric(model_scores["risk_score_total"], errors="coerce")
         df["model_version"] = model_scores["model_version"]
@@ -127,7 +122,7 @@ def build_gold_lga_risk() -> pd.DataFrame:
             + (df["u5mr_mean"].fillna(0).clip(0, 200) / 20) * 0.25
             + (10 - (_cov.clip(0, 100) / 10)) * 0.20
         )
-        df["model_version"] = "v1.3-fallback"
+        df["model_version"] = f"{MODEL_VERSION}-fallback"
 
     components = _component_scores(df)
     df = pd.concat([df, components], axis=1)

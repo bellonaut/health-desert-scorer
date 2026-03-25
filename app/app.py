@@ -112,7 +112,7 @@ def _build_parent_app_path(route: str) -> str:
     elif route == "global":
         route_params["app"] = "global"
 
-    for key in ("testing", "persona", "session"):
+    for key in ("state", "focus", "depth", "lga", "compare", "year", "mobile", "testing", "persona", "session"):
         if key in params:
             route_params[key] = _last_param_value(params[key])
 

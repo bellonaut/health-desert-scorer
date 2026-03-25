@@ -4,7 +4,40 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-03-25
+
 ### Added
+- Added a standalone FastAPI runtime in `app/api.py` plus service worker assets and PWA icons so the Nigeria UI can run directly at `localhost:8601` without the Streamlit iframe loop.
+- Added a reusable `scripts/validate_pwa.ps1` helper for local API plus PWA wiring checks.
+- Added a compact methodology panel to the Streamlit host so the embedded app has adjacent model and scope context.
+
+### Changed
+- Changed the Streamlit host to render the Nigeria app directly with `st.components.v1.html(...)` instead of writing a temporary served file.
+- Changed embedded payload generation so state-filtered views keep nationwide map geometry available for local chip and LGA rehydration flows.
+- Changed the standalone PWA shell to load only first-render assets up front, defer noncritical UI work, and use non-blocking font loading.
+- Changed app palettes in the Folium and nurse-view surfaces to an Okabe-Ito-style colorblind-safe scale.
+- Changed the global landing pages to report three DHS survey waves.
+- Changed travel-time generation to support local ORS execution, checkpoint-only rebuilds, and bounded-memory checkpoint consolidation.
+
+### Fixed
+- Fixed the standalone chip and polygon selection loop so clicks update URL state, refetch payload data, recolor the map, and refresh the sidebar without a hard reload.
+- Fixed the `Data / Map / Print` control alignment relative to the map chip row.
+- Fixed the merge reconciliation between the standalone embedded render path and the UI overhaul so the layer strip, depth toggle, and map/table controls render together without duplicates.
+- Fixed deployed Nigeria rendering so the app no longer depends on a browser-local temporary file server path.
+- Fixed PWA startup performance by deferring compare, tutorial, print, and support UI work until after first paint.
+
+### Verification
+- `pytest -q`
+- `node tests/accessibility_test.js`
+- `python -m streamlit run app/app.py --server.headless true --server.port 8501`
+- `node tmp/playwright_probe.js`
+- `npx.cmd lighthouse http://127.0.0.1:8601/?pwa=1 --only-categories=performance --output=json --output-path=tmp/lighthouse-pwa.json --chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage"`
+
+## [1.4.0] - 2026-03-24
+
+### Added
+- Added versioned model artifact output for `models/risk_model_v1.4/`, including `metadata.json` and `MODEL_CARD.md`.
+- Added a two-stage Nigeria scoring strategy that keeps a shared all-year base model and applies routed `pop_pct_60min` recalibration to 2024 only.
 - Added DHS 2024 as a third year across feature generation, silver outputs, gold outputs, and app year selectors.
 - Added mock 2024 DHS KR and HR CSV fallbacks for local bootstrap workflows in `scripts/create_mock_dhs.py`.
 - Added versioned model artifact output support for `models/risk_model_v1.3/`.
@@ -14,6 +47,8 @@ All notable changes to this project are documented in this file.
 - Added vendored frontend runtime assets and a lightweight localhost file server so the embedded Nigeria app can load Leaflet, Turf, and export helpers reliably.
 
 ### Changed
+- Updated gold scoring to load `risk_model_v1.4` and request required features from the artifact rather than relying on a hard-coded feature list.
+- Updated the Methodology page and embedded UI defaults to surface model version `v1.4`.
 - Updated gold scoring to use model version `v1.3`.
 - Updated training to use all three DHS years with temporal validation holding out 2024.
 - Updated year selectors to `2024`, `2018`, `2013`, and `Both (avg)`.
@@ -26,6 +61,9 @@ All notable changes to this project are documented in this file.
 - Updated gold risk outputs to rank-normalize `risk_score_total` within each year and keep `risk_score` synchronized as the 0-1 derivative.
 
 ### Fixed
+- Fixed v1.3-style evaluation leakage by replacing the old binary mortality-threshold training objective with an honest continuous two-stage scoring workflow for v1.4.
+- Fixed `risk_score_access_60min` so 2013/2018 rows fall back row-wise to `coverage_5km` instead of being treated as zero-access whenever 2024 routed coverage exists.
+- Fixed the release rebuild handoff so corrected travel-time coverage reaches `processed`, `bronze`, `silver`, and `gold` consistently before retraining.
 - Fixed DHS household recode alias handling for real HR inputs.
 - Fixed model serialization so `src.models.score.score_lga(..., version=\"v1.3\")` resolves correctly.
 - Fixed confidence display so hotspot and detail payloads no longer expose raw over-precise percentages.
@@ -39,6 +77,7 @@ All notable changes to this project are documented in this file.
 - Fixed top-right map controls so `Data / Map / Print`, `MAP / RESEARCH`, and `View map as table` no longer overlap on the deployed Nigeria UI.
 
 ### Verification
+- `python -m src.models.train_models`
 - `python -m src.data.build_features`
 - `python -m src.data.migrate_release_data`
 - `python -m src.data.build_silver`

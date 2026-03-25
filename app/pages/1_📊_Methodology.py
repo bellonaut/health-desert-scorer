@@ -10,7 +10,7 @@ import streamlit as st
 from utils.analytics import log_event
 
 ROOT = Path(__file__).resolve().parents[2]
-MODEL_DIR = ROOT / "models" / "risk_model_v1.2"
+MODEL_DIR = ROOT / "models" / "risk_model_v1.4"
 
 st.set_page_config(page_title="Methodology - Health Desert Scorer", page_icon="📊", layout="wide")
 st.title("📊 Methodology & Data Sources")
@@ -24,15 +24,15 @@ This tool supports planning and prioritization. It is not for clinical diagnosis
 )
 st.markdown("Website: [www.bashir.bio](https://www.bashir.bio)")
 
-metrics = {"accuracy": 0.0, "f1": 0.0, "roc_auc": 0.0}
+metrics = {"spearman": 0.0, "mae": 0.0, "rmse": 0.0}
 metrics_path = MODEL_DIR / "metrics.json"
 if metrics_path.exists():
     metrics.update(json.loads(metrics_path.read_text()))
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Model Accuracy", f"{metrics['accuracy']:.1%}")
-c2.metric("F1 Score", f"{metrics['f1']:.2f}")
-c3.metric("ROC-AUC", f"{metrics['roc_auc']:.2f}")
+c1.metric("Spearman rho", f"{metrics.get('v1_4', {}).get('spearman', metrics['spearman']):.2f}")
+c2.metric("MAE", f"{metrics.get('v1_4', {}).get('mae', metrics['mae']):.2f}")
+c3.metric("RMSE", f"{metrics.get('v1_4', {}).get('rmse', metrics['rmse']):.2f}")
 
 st.subheader("Limitations")
 st.warning(
@@ -45,11 +45,13 @@ st.warning(
 )
 
 st.subheader("Model Card")
-model_card = MODEL_DIR / "model_card.md"
-if model_card.exists():
+model_card = MODEL_DIR / "MODEL_CARD.md"
+legacy_model_card = MODEL_DIR / "model_card.md"
+card_path = model_card if model_card.exists() else legacy_model_card
+if card_path.exists():
     st.download_button(
         "Download Model Card",
-        model_card.read_text(encoding="utf-8"),
+        card_path.read_text(encoding="utf-8"),
         file_name="health_desert_model_card.md",
         mime="text/markdown",
     )

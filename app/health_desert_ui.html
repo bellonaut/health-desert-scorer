@@ -3,8 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f172a">
 <title>Nigeria Health Desert Risk Scorer</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
+<link rel="manifest" href="static/manifest.json">
+<link rel="stylesheet" href="assets/leaflet.css">
+<link rel="stylesheet" href="health_desert_ui.css">
 <!-- APP_STYLE -->
 <!-- DATA_INJECTION -->
 </head>
@@ -120,27 +127,28 @@
       </div>
     </div>
 
-    <div class="map-top-right-controls">
-      <div class="map-top-right-row">
-        <div class="map-mode-toggle" id="map-mode-toggle">
-          <button type="button" class="mode-btn active" data-mode="polygon">Data</button>
-          <button type="button" class="mode-btn" data-mode="dark">Map</button>
-          <button type="button" class="mode-btn" data-mode="print">Print</button>
-        </div>
-        <div class="depth-toggle depth-toggle-desktop" aria-label="View depth">
-          <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
-          <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
-        </div>
+    <div class="map-top-bar">
+      <div class="layer-strip">
+        <button type="button" class="layer-btn active" data-layer="Risk score" aria-pressed="true">Risk score</button>
+        <button type="button" class="layer-btn" data-layer="Facilities" aria-pressed="false">Facilities</button>
+        <button type="button" class="layer-btn" data-layer="Connectivity" aria-pressed="false">Connectivity</button>
+        <button type="button" class="layer-btn depth-gate depth-1" data-layer="Towers" aria-pressed="false">Towers</button>
+        <button type="button" class="layer-btn depth-gate depth-1" data-layer="SHAP" aria-pressed="false">SHAP</button>
       </div>
-      <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
-    </div>
-
-    <div class="layer-strip">
-      <button type="button" class="layer-btn active" data-layer="Risk score" aria-pressed="true">Risk score</button>
-      <button type="button" class="layer-btn" data-layer="Facilities" aria-pressed="false">Facilities</button>
-      <button type="button" class="layer-btn" data-layer="Connectivity" aria-pressed="false">Connectivity</button>
-      <button type="button" class="layer-btn depth-gate depth-1" data-layer="Towers" aria-pressed="false">Towers</button>
-      <button type="button" class="layer-btn depth-gate depth-1" data-layer="SHAP" aria-pressed="false">SHAP</button>
+      <div class="map-top-right-controls">
+        <div class="map-top-right-row">
+          <div class="map-mode-toggle" id="map-mode-toggle">
+            <button type="button" class="mode-btn active" data-mode="polygon">Data</button>
+            <button type="button" class="mode-btn" data-mode="dark">Map</button>
+            <button type="button" class="mode-btn" data-mode="print">Print</button>
+          </div>
+          <div class="depth-toggle depth-toggle-desktop" aria-label="View depth">
+            <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
+            <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
+          </div>
+        </div>
+        <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
+      </div>
     </div>
 
     <div class="map-legend">
@@ -161,9 +169,8 @@
     </div>
 
     <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
-    <div class="map-credit">made by bashir aminu bello 2026</div>
-
-    <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 &middot; NHFR &middot; ORS isochrones &middot; OpenCellID &middot; Model v1.3</div>
+    <div class="map-credit">made by bashir aminu bello 2025</div>
+    <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 &middot; NHFR &middot; ORS isochrones &middot; OpenCellID &middot; Model v1.4</div>
   </div>
 </div>
 
@@ -242,5 +249,37 @@
 </div>
 
 <!-- APP_SCRIPT -->
+<script type="module">
+(function standaloneAssetLoader() {
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.body.appendChild(script);
+    });
+  }
+
+  if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }, { once: true });
+  }
+
+  if (typeof window.selectLGA === 'function') return;
+
+  const appBundle = loadScript('health_desert_ui.js');
+  const leafletBundle = loadScript('assets/leaflet.js')
+    .then(() => {
+      window.dispatchEvent(new Event('hd:leaflet-ready'));
+    });
+
+  Promise.all([appBundle, leafletBundle]).catch((error) => {
+    console.error('[HDS] standalone loader error:', error);
+  });
+})();
+</script>
 </body>
 </html>
