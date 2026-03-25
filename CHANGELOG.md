@@ -22,6 +22,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 - Fixed the standalone chip and polygon selection loop so clicks update URL state, refetch payload data, recolor the map, and refresh the sidebar without a hard reload.
 - Fixed the `Data / Map / Print` control alignment relative to the map chip row.
+- Fixed the merge reconciliation between the standalone embedded render path and the UI overhaul so the layer strip, depth toggle, and map/table controls render together without duplicates.
 - Fixed deployed Nigeria rendering so the app no longer depends on a browser-local temporary file server path.
 - Fixed PWA startup performance by deferring compare, tutorial, print, and support UI work until after first paint.
 

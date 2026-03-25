@@ -11,8 +11,7 @@ from urllib.parse import urlencode
 import streamlit as st
 
 from bridge import render_embedded_app
-from data_api import filter_geo, latest_year
-from nurse_view import render_methodology_panel
+from data_api import latest_year
 from utils.analytics import log_event
 from utils.error_handler import safe_execute, show_system_status
 
@@ -427,20 +426,6 @@ def main() -> None:
     geo_df, shap_df = data
     if st.session_state.get("hd_year") is None:
         st.session_state["hd_year"] = latest_year(geo_df)
-
-    active_scope = filter_geo(
-        geo_df,
-        state_filter=st.session_state.get("hd_state_filter", "All Nigeria"),
-        year=st.session_state.get("hd_year"),
-    )
-
-    with st.sidebar:
-        st.divider()
-        render_methodology_panel(
-            active_scope,
-            active_year=st.session_state.get("hd_year"),
-            model_version=geo_df.attrs.get("model_version"),
-        )
 
     html = render_embedded_app(geo_df, shap_df, st.session_state)
     st.components.v1.html(html, height=10000, scrolling=False)

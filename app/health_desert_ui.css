@@ -948,12 +948,29 @@ header {
   position: absolute;
   top: 20px;
   left: 78px;
-  right: 130px;
+  right: 24px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 12px;
   z-index: 410;
+}
+
+.map-top-right-controls {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-self: end;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.map-top-right-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .layer-strip {
@@ -1011,13 +1028,16 @@ header {
   position: relative;
   top: auto;
   right: auto;
-  margin-left: auto;
   z-index: 1;
   display: flex;
   background: rgba(9,11,16,0.88);
   border: 0.5px solid rgba(255,255,255,0.1);
   border-radius: 4px;
   overflow: hidden;
+}
+
+.map-top-right-row .depth-toggle {
+  margin-left: 0;
 }
 
 .mode-btn {
@@ -1043,10 +1063,11 @@ header {
 .mode-btn:hover:not(.active) { color: #9ca3af; }
 
 .map-table-toggle {
-  position: absolute;
-  right: 24px;
-  top: 72px;
-  z-index: 420;
+  position: relative;
+  right: auto;
+  top: auto;
+  z-index: 1;
+  align-self: flex-end;
   background: rgba(15,17,23,0.92);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1226,7 +1247,7 @@ header {
   }
   .map-top-bar {
     left: 64px;
-    right: 130px;
+    right: 24px;
   }
   .layer-strip {
     flex-wrap: wrap;
@@ -2273,10 +2294,10 @@ body {
 }
 
 .map-area .depth-toggle-desktop {
-  position: absolute;
-  top: 20px;
-  right: 24px;
-  z-index: 420;
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: 1;
   margin-left: 0;
   display: flex;
   background: rgba(9,11,16,0.92);
@@ -2382,6 +2403,36 @@ body {
     left: 12px;
     gap: 6px;
     z-index: 420;
+  }
+
+  .map-top-bar {
+    position: static;
+    display: block;
+  }
+
+  .map-mode-toggle {
+    position: absolute;
+    right: 12px;
+  }
+
+  .map-top-right-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    gap: 8px;
+    max-width: calc(100% - 24px);
+  }
+
+  .map-top-right-row {
+    gap: 8px;
+  }
+
+  .map-top-right-controls .map-table-toggle,
+  .map-table-toggle {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
   }
 
   .question-bar,

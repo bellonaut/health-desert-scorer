@@ -103,10 +103,6 @@
 
   <div class="map-area" id="results" role="region" aria-label="Map and layers">
     <div id="map-leaflet" class="map-leaflet"></div>
-    <div class="depth-toggle depth-toggle-desktop" aria-label="View depth">
-      <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
-      <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
-    </div>
     <div class="depth-toggle depth-toggle-mobile" aria-label="View depth">
       <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
       <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
@@ -139,11 +135,19 @@
         <button type="button" class="layer-btn depth-gate depth-1" data-layer="Towers" aria-pressed="false">Towers</button>
         <button type="button" class="layer-btn depth-gate depth-1" data-layer="SHAP" aria-pressed="false">SHAP</button>
       </div>
-
-      <div class="map-mode-toggle" id="map-mode-toggle">
-        <button type="button" class="mode-btn active" data-mode="polygon">Data</button>
-        <button type="button" class="mode-btn" data-mode="dark">Map</button>
-        <button type="button" class="mode-btn" data-mode="print">Print</button>
+      <div class="map-top-right-controls">
+        <div class="map-top-right-row">
+          <div class="map-mode-toggle" id="map-mode-toggle">
+            <button type="button" class="mode-btn active" data-mode="polygon">Data</button>
+            <button type="button" class="mode-btn" data-mode="dark">Map</button>
+            <button type="button" class="mode-btn" data-mode="print">Print</button>
+          </div>
+          <div class="depth-toggle depth-toggle-desktop" aria-label="View depth">
+            <button type="button" class="depth-btn active" data-depth="0" aria-pressed="true">MAP</button>
+            <button type="button" class="depth-btn" data-depth="1" aria-pressed="false">RESEARCH</button>
+          </div>
+        </div>
+        <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
       </div>
     </div>
 
@@ -164,10 +168,8 @@
       </div>
     </div>
 
-    <button type="button" class="map-table-toggle" id="map-table-toggle">View map as table</button>
     <div class="map-table" id="map-table" role="region" aria-label="Map data table" aria-hidden="true"></div>
-    <div class="map-credit">made by bashir aminu bello 2026</div>
-
+    <div class="map-credit">made by bashir aminu bello 2025</div>
     <div class="data-footnote" id="data-footnote">DHS 2013/2018/2024 &middot; NHFR &middot; ORS isochrones &middot; OpenCellID &middot; Model v1.4</div>
   </div>
 </div>
