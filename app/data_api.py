@@ -576,12 +576,22 @@ def _risk_score_out_of_10(row: Mapping[str, Any]) -> float | None:
 
 
 def get_ranked_hotspots(
-    geo_df: pd.DataFrame,
-    focus: str,
+    geo_df: pd.DataFrame | None = None,
+    focus: str = "All risk",
     state_filter: str | None = None,
     year: str | int | None = None,
     limit: int = 10,
+    *,
+    state: str | None = None,
 ) -> list[dict[str, Any]]:
+    if geo_df is not None and not hasattr(geo_df, "columns"):
+        focus = str(geo_df)
+        geo_df = None
+    if state_filter is None and state is not None:
+        state_filter = state
+    if geo_df is None:
+        geo_df, _ = load_backend_data(boundary_resolution="low", is_mobile=True)
+
     column = FOCUS_COLUMN.get(focus, "risk_score")
     ascending = column in ASCENDING_FOCUS
     filtered = filter_geo(geo_df, state_filter, year)

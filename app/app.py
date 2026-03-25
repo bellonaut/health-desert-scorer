@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Mapping
@@ -13,8 +11,8 @@ from urllib.parse import urlencode
 import streamlit as st
 
 from bridge import render_embedded_app
-from data_api import latest_year
-from server import start_file_server, write_and_get_url
+from data_api import filter_geo, latest_year
+from nurse_view import render_methodology_panel
 from utils.analytics import log_event
 from utils.error_handler import safe_execute, show_system_status
 
@@ -115,7 +113,7 @@ def _build_parent_app_path(route: str) -> str:
     elif route == "global":
         route_params["app"] = "global"
 
-    for key in ("testing", "persona", "session"):
+    for key in ("state", "focus", "depth", "lga", "compare", "year", "mobile", "testing", "persona", "session"):
         if key in params:
             route_params[key] = _last_param_value(params[key])
 
@@ -384,13 +382,6 @@ def _cached_load(
     )
 
 
-@st.cache_resource
-def get_serve_dir() -> Path:
-    serve_dir = Path(tempfile.mkdtemp(prefix="hds_serve_"))
-    start_file_server(serve_dir)
-    return serve_dir
-
-
 def main() -> None:
     st.set_page_config(
         page_title="HEALTHDESERT",
@@ -437,11 +428,22 @@ def main() -> None:
     if st.session_state.get("hd_year") is None:
         st.session_state["hd_year"] = latest_year(geo_df)
 
-    get_serve_dir()
+    active_scope = filter_geo(
+        geo_df,
+        state_filter=st.session_state.get("hd_state_filter", "All Nigeria"),
+        year=st.session_state.get("hd_year"),
+    )
+
+    with st.sidebar:
+        st.divider()
+        render_methodology_panel(
+            active_scope,
+            active_year=st.session_state.get("hd_year"),
+            model_version=geo_df.attrs.get("model_version"),
+        )
+
     html = render_embedded_app(geo_df, shap_df, st.session_state)
-    version = hashlib.sha1(html.encode("utf-8")).hexdigest()[:12]
-    url = write_and_get_url(html, filename="app.html")
-    st.components.v1.iframe(f"{url}?v={version}", height=10000, scrolling=False)
+    st.components.v1.html(html, height=10000, scrolling=False)
     show_system_status(
         data_last_updated=geo_df.attrs.get("data_last_updated"),
         model_version=geo_df.attrs.get("model_version"),

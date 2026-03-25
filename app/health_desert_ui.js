@@ -14,10 +14,8 @@
     if (current !== next) {
       url.searchParams.set('mobile', next);
       window.parent.history.replaceState({}, '', url.toString());
-      setTimeout(() => {
-        window.parent.location.reload();
-      }, 100);
     }
+    window.parent.postMessage({ type: 'hd_mobile_detected', mobile: next }, '*');
   } catch (e) {
     // Cross-origin iframe restrictions: no-op.
   }
@@ -70,15 +68,103 @@ function replaceParentLocation(nextUrl) {
   return false;
 }
 
-// Data injected from Streamlit
-const injected = window.__INITIAL_DATA__ || {};
-const meta = injected.meta || {};
-const lgas = Array.isArray(injected.lgas) ? injected.lgas : [];
-const hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [];
-// Use all_lgas_for_search for comprehensive search coverage
-const allLgasForSearch = Array.isArray(injected.all_lgas_for_search) ? injected.all_lgas_for_search : [];
-const stateOptions = ['All Nigeria', ...(injected.states || [])];
+// Data injected from Streamlit or hydrated for standalone mode.
+if (!window.__INITIAL_DATA__) {
+  const standaloneUrl = new URL(window.location.href);
+  const standaloneParams = standaloneUrl.searchParams;
+  const year = standaloneParams.get('year') || '2024';
+  const focus = standaloneParams.get('focus') || 'All risk';
+  const state = standaloneParams.get('state') || 'All Nigeria';
+  const query = new URLSearchParams({ year, focus, state });
+  const hotspotList = document.getElementById('hotspot-list');
+  const statusText = document.getElementById('apply-status-text');
+  const countText = document.getElementById('lga-count');
+  const resNote = document.querySelector('.res-note');
+  const mapArea = document.querySelector('.map-area');
+
+  if (statusText) statusText.textContent = 'loading';
+  if (countText) countText.textContent = '...';
+  if (resNote) resNote.textContent = 'Loading map data...';
+  if (hotspotList) {
+    hotspotList.innerHTML = '<div class="hotspot-empty">Loading map data...</div>';
+  }
+  if (mapArea && !document.getElementById('map-empty-state')) {
+    const empty = document.createElement('div');
+    empty.id = 'map-empty-state';
+    empty.className = 'map-empty-state';
+    empty.textContent = 'Loading map data...';
+    mapArea.appendChild(empty);
+  }
+
+  fetch(`/api/data?${query.toString()}`)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Standalone hydration failed: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((data) => {
+      window.__INITIAL_DATA__ = data;
+      applyPayloadData(data, { preserveSelection: false, preserveCompare: false });
+      attachStandaloneMessageHandler();
+      onLeafletReady(() => bootApp());
+    })
+    .catch((error) => {
+      console.error('[HDS] standalone hydration error:', error);
+      if (statusText) statusText.textContent = 'error';
+      if (hotspotList) {
+        hotspotList.innerHTML = '<div class="hotspot-empty">Failed to load map data. Try refreshing.</div>';
+      }
+      const empty = document.getElementById('map-empty-state');
+      if (empty) empty.textContent = 'Failed to load map data. Try refreshing.';
+    });
+}
+
+const APP_STATE_MESSAGE_TYPE = 'hd_apply_state';
+const standaloneMode = window.parent === window;
 const discoveredParentUrl = getParentUrl();
+let configuredParentUrl = null;
+
+let injected = {};
+let meta = {};
+let lgas = [];
+let hotspotsPayload = [];
+let allLgasForSearch = [];
+let stateOptions = ['All Nigeria'];
+let currentState = 'All Nigeria';
+let currentDepth = 0;
+let currentFocus = 'All risk';
+let currentYear = '2024';
+let currentLayer = 'Risk score';
+let currentMapMode = 'polygon';
+let isMobile = document.documentElement.getAttribute('data-mobile') === '1';
+let pendingEvent = null;
+let bootstrappingLatestYear = false;
+let selectedLGA = null;
+let compareLGAs = [];
+let hasTowerConnectivityData = false;
+let mapInstance = null;
+let geoLayer = null;
+let baseGeoJson = null;
+let hasFitBounds = false;
+let baseTileLayer = null;
+let pendingMapInitFrame = null;
+let standaloneMessageHandlerAttached = false;
+let standaloneRefreshToken = 0;
+let standaloneFetchController = null;
+
+const lgaById = new Map();
+const featureLayerById = new Map();
+const fieldValuesCache = new Map();
+const riskLookup = {};
+
+function onLeafletReady(callback) {
+  if (window.L) {
+    callback();
+    return;
+  }
+  window.addEventListener('hd:leaflet-ready', callback, { once: true });
+}
 
 function buildConfiguredParentUrl() {
   if (!meta.parent_app_path) return null;
@@ -103,7 +189,9 @@ function buildConfiguredParentUrl() {
   }
 }
 
-const configuredParentUrl = buildConfiguredParentUrl();
+function refreshConfiguredParentUrl() {
+  configuredParentUrl = buildConfiguredParentUrl();
+}
 
 function getAppStateBaseUrl() {
   if (configuredParentUrl) return new URL(configuredParentUrl.toString());
@@ -116,6 +204,7 @@ function getAppStateBaseUrl() {
 const parentUrl = getAppStateBaseUrl();
 const urlParams = parentUrl ? new URLSearchParams(parentUrl.search) : new URLSearchParams();
 const hasExplicitYearParam = urlParams.has('year');
+const pwaMode = ['1', 'true', 'yes'].includes((urlParams.get('pwa') || '').toLowerCase());
 const testingMode = ['1', 'true', 'yes'].includes((urlParams.get('testing') || '').toLowerCase());
 const testPersona = urlParams.get('persona') || 'unknown';
 let testSession = urlParams.get('session') || '';
@@ -123,17 +212,87 @@ if (testingMode && !testSession) {
   testSession = String(Date.now());
 }
 
-let currentState = meta.state_filter || 'All Nigeria';
-let currentDepth = Number(meta.depth || 0);
-if (Number.isNaN(currentDepth) || currentDepth < 0) currentDepth = 0;
-if (currentDepth > 1) currentDepth = 1;
-let currentFocus = meta.focus || 'All risk';
-let currentYear = meta.year != null ? String(meta.year) : '2018';
-let currentLayer = 'Risk score';
-let currentMapMode = 'polygon';
-let isMobile = document.documentElement.getAttribute('data-mobile') === '1';
-let pendingEvent = null;
-let bootstrappingLatestYear = false;
+function normalizeCompareIds(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === 'string') return value.split(',').map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+function resetMapDataState() {
+  baseGeoJson = null;
+  hasFitBounds = false;
+  featureLayerById.clear();
+  if (geoLayer && mapInstance) {
+    try {
+      mapInstance.removeLayer(geoLayer);
+    } catch (e) {
+      // ignore layer removal issues during data refresh
+    }
+  }
+  geoLayer = null;
+}
+
+function applyPayloadData(data, { preserveSelection = true, preserveCompare = true } = {}) {
+  const preservedSelectedId = preserveSelection ? String(selectedLGA?.id || meta.selected_lga || '') : '';
+  const preservedCompareIds = preserveCompare ? compareLGAs.map((item) => String(item.id)) : [];
+
+  injected = data || {};
+  meta = injected.meta || {};
+  lgas = Array.isArray(injected.lgas) ? injected.lgas : [];
+  hotspotsPayload = Array.isArray(injected.hotspots) ? injected.hotspots : [];
+  allLgasForSearch = Array.isArray(injected.all_lgas_for_search) ? injected.all_lgas_for_search : [];
+  stateOptions = ['All Nigeria', ...(injected.states || [])];
+
+  currentState = meta.state_filter || currentState || 'All Nigeria';
+  currentDepth = Number(meta.depth ?? currentDepth ?? 0);
+  if (Number.isNaN(currentDepth) || currentDepth < 0) currentDepth = 0;
+  if (currentDepth > 1) currentDepth = 1;
+  currentFocus = meta.focus || currentFocus || 'All risk';
+  currentYear = meta.year != null ? String(meta.year) : (currentYear || '2024');
+
+  refreshConfiguredParentUrl();
+
+  lgaById.clear();
+  lgas.forEach((lga) => {
+    lgaById.set(String(lga.id), lga);
+  });
+
+  fieldValuesCache.clear();
+  Object.keys(riskLookup).forEach((key) => delete riskLookup[key]);
+  (injected.map?.choropleth || []).forEach((item) => {
+    const val = item.risk_norm ?? item.risk;
+    riskLookup[String(item.id)] = val != null ? Number(val) : null;
+  });
+
+  hasTowerConnectivityData = lgas.some((lga) => {
+    const value = safeNum(lga.towers);
+    return value != null && value > 0;
+  });
+
+  const compareIds = normalizeCompareIds(meta.compare_lgas).length
+    ? normalizeCompareIds(meta.compare_lgas)
+    : preservedCompareIds;
+  compareLGAs = compareIds
+    .map((id) => lgaById.get(String(id)))
+    .filter(Boolean)
+    .map((item) => ({ ...item }));
+
+  const selectedId = meta.selected_lga || (injected.selected && injected.selected.id) || preservedSelectedId;
+  if (selectedId) {
+    const base = lgaById.get(String(selectedId)) || {};
+    const detail = injected.selected && String(injected.selected.id) === String(selectedId)
+      ? injected.selected
+      : {};
+    const merged = mergeLga(base, detail);
+    selectedLGA = Object.keys(merged).length ? merged : null;
+  } else {
+    selectedLGA = null;
+  }
+}
+
+if (window.__INITIAL_DATA__) {
+  applyPayloadData(window.__INITIAL_DATA__, { preserveSelection: false, preserveCompare: false });
+}
 
 if (!hasExplicitYearParam && currentYear !== '2024') {
   try {
@@ -147,10 +306,6 @@ if (!hasExplicitYearParam && currentYear !== '2024') {
   }
 }
 
-const lgaById = new Map(lgas.map((l) => [String(l.id), l]));
-const featureLayerById = new Map();
-const fieldValuesCache = new Map();
-
 function mergeLga(base, detail) {
   const merged = { ...(base || {}), ...(detail || {}) };
   if ((merged.shap == null) && base && base.shap != null) {
@@ -159,34 +314,15 @@ function mergeLga(base, detail) {
   return merged;
 }
 
-const selectedId = meta.selected_lga || (injected.selected && injected.selected.id);
-let selectedLGA = null;
-if (selectedId) {
-  const base = lgaById.get(String(selectedId)) || {};
-  selectedLGA = mergeLga(base, injected.selected || {});
-} else if (injected.selected) {
-  selectedLGA = injected.selected;
-}
-
-let compareLGAs = (meta.compare_lgas || [])
-  .map((id) => lgaById.get(String(id)))
-  .filter(Boolean);
-
-const riskLookup = {};
-(injected.map?.choropleth || []).forEach((item) => {
-  const val = item.risk_norm ?? item.risk;
-  riskLookup[String(item.id)] = val != null ? Number(val) : null;
-});
-
-let mapInstance = null;
-let geoLayer = null;
-let baseGeoJson = null;
-let hasFitBounds = false;
-let baseTileLayer = null;
-let pendingMapInitFrame = null;
-
 const BASE_TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
-const TOUR_STORAGE_KEY = 'hd_tour_v1_completed';
+const TOUR_STORAGE_KEY = 'hd_tour_v2_completed';
+const STATUS_COLOR_GOOD = '#0072B2';
+const STATUS_COLOR_WARN = '#E69F00';
+const STATUS_COLOR_BAD = '#D55E00';
+const TEXT_COLOR_MUTED = '#C2CCD9';
+const TEXT_COLOR_DIM = '#A5B0C2';
+const SCORE_COLOR_LOW = '#8ED3FF';
+const SCORE_COLOR_HIGH = '#FF9B6B';
 const STATE_BOUNDS = {
   Abia: { s: 4.7, w: 7.1, n: 5.9, e: 8.1 },
   Adamawa: { s: 7.8, w: 11.5, n: 10.9, e: 13.7 },
@@ -313,11 +449,6 @@ function safeNum(value) {
   return Number(value);
 }
 
-const hasTowerConnectivityData = lgas.some((lga) => {
-  const value = safeNum(lga.towers);
-  return value != null && value > 0;
-});
-
 function scoreOutOfTen(source) {
   const riskScoreTotal = safeNum(source?.risk_score_total);
   if (riskScoreTotal != null) return riskScoreTotal;
@@ -413,6 +544,105 @@ function getPrintColor(score) {
   if (score === null || score === undefined || Number.isNaN(Number(score))) return '#e5e5e5';
   const s = Math.max(0, Math.min(10, Number(score)));
   return interpolateColor('#ffe0b2', '#bf360c', s / 10);
+}
+
+function getCoverageColor(pct) {
+  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return 'rgba(80,80,90,0.5)';
+  const t = Math.max(0, Math.min(100, Number(pct)));
+  if (t < 40) {
+    const s = 1 - (t / 40);
+    return interpolateColor('#ff6b35', '#d73027', s);
+  }
+  if (t < 70) {
+    const s = (t - 40) / 30;
+    return interpolateColor('#ff6b35', '#f7c59f', s);
+  }
+  const s = (t - 70) / 30;
+  return interpolateColor('#f7c59f', '#3c4150', s);
+}
+
+function legendHtml(title, gradient, labels, rows) {
+  const labelHtml = Array.isArray(labels) && labels.length
+    ? `
+      <div class="legend-labels">
+        ${labels.map((label) => `<span>${label}</span>`).join('')}
+      </div>
+    `
+    : '';
+  const rowHtml = Array.isArray(rows)
+    ? rows.map((row) => `
+        <div class="legend-row">
+          <span class="legend-dot" style="background:${row.color}"></span>
+          <span>${row.text}</span>
+        </div>
+      `).join('')
+    : '';
+
+  return `
+    <div style="font-family:'IBM Plex Mono',monospace">
+      <div class="legend-title">${escapeHtml(title)}</div>
+      <div class="legend-gradient" style="background:${gradient}"></div>
+      ${labelHtml}
+      ${rowHtml}
+    </div>
+  `;
+}
+
+function updateLegend() {
+  const legend = document.querySelector('.map-legend');
+  if (!legend) return;
+
+  if (currentMapMode === 'print') {
+    legend.innerHTML = legendHtml(
+      'PRINT SCALE',
+      'linear-gradient(to right, #ffe0b2, #bf360c)',
+      ['0', '5', '10'],
+      [
+        { color: '#ffe0b2', text: 'Lower score / lighter fill' },
+        { color: '#bf360c', text: 'Higher score / darker fill' },
+      ],
+    );
+    return;
+  }
+
+  if (currentLayer === 'Risk score' && currentFocus === '60-min coverage') {
+    legend.innerHTML = legendHtml(
+      '60-MIN DRIVE',
+      'linear-gradient(to right, #d73027, #ff6b35, #f7c59f, #3c4150)',
+      ['< 40%', '70%+'],
+      [
+        { color: '#d73027', text: 'Low road access (< 40% pop within 60-min drive)' },
+        { color: '#ff6b35', text: 'Moderate access' },
+        { color: '#3c4150', text: 'Well served (> 70%)' },
+      ],
+    );
+    return;
+  }
+
+  if (currentLayer === 'SHAP') {
+    legend.innerHTML = legendHtml(
+      'SHAP',
+      'linear-gradient(to right, #2166ac, #f7f7f7, #d73027)',
+      ['-', '0', '+'],
+      [
+        { color: '#2166ac', text: 'Decreases risk' },
+        { color: '#d73027', text: 'Increases risk' },
+      ],
+    );
+    return;
+  }
+
+  const title = currentLayer === 'Risk score' ? currentFocus : currentLayer;
+  legend.innerHTML = legendHtml(
+    String(title || 'Risk score').toUpperCase(),
+    'linear-gradient(to right, #2166ac, #aec4d6, #e8a49a, #d73027)',
+    ['0', '5.5', '10'],
+    [
+      { color: '#2166ac', text: 'Lower barrier / lower risk' },
+      { color: '#aec4d6', text: 'Near median' },
+      { color: '#d73027', text: 'Higher barrier / higher risk' },
+    ],
+  );
 }
 
 const CHIP_COLOR_FIELD = {
@@ -526,6 +756,9 @@ function fillColorForFeature(source, layer = currentLayer) {
     const norm = scaledLayerValue(source.id ?? source.lga_id ?? source.lga_uid);
     return riskColorHex(norm);
   }
+  if (layer === 'Risk score' && currentFocus === '60-min coverage') {
+    return getCoverageColor(safeNum(source?.pop_pct_60min));
+  }
   return getColor(score);
 }
 
@@ -583,8 +816,8 @@ function switchMapMode(mode) {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
   applyMapModeBaseLayer();
+  updateLegend();
   renderMap();
-  applyStateDimming();
 }
 
 function handleStateChange(selectedState) {
@@ -593,7 +826,6 @@ function handleStateChange(selectedState) {
   renderHotspots();
   renderMap();
   fitMapToCurrentState();
-  applyStateDimming();
   pushStateToPython();
   queueEvent('filter_change', { state: currentState });
 }
@@ -739,6 +971,158 @@ function buildStateUrl() {
   return `${url.pathname}?${params.toString()}`;
 }
 
+function buildStateMessagePayload() {
+  return {
+    state: currentState,
+    focus: currentFocus,
+    depth: currentDepth,
+    year: currentYear,
+    mobile: isMobile ? '1' : '0',
+    lga_uid: selectedLGA?.id ? String(selectedLGA.id) : null,
+    compare: compareLGAs.map((item) => String(item.id)),
+    layer: currentLayer,
+    map_mode: currentMapMode,
+    url: buildStateUrl(),
+  };
+}
+
+function scheduleNonCriticalWork(task, timeout = 600) {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(() => task(), { timeout });
+    return;
+  }
+  window.setTimeout(task, 0);
+}
+
+const deferredScriptLoads = new Map();
+
+function ensureExternalScript(src, globalName) {
+  if (globalName && typeof window[globalName] !== 'undefined') {
+    return Promise.resolve();
+  }
+  if (deferredScriptLoads.has(src)) {
+    return deferredScriptLoads.get(src);
+  }
+
+  const promise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.body.appendChild(script);
+  });
+
+  deferredScriptLoads.set(src, promise);
+  return promise;
+}
+
+function postStateMessage(payload) {
+  try {
+    window.parent.postMessage({ type: APP_STATE_MESSAGE_TYPE, state: payload }, '*');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function normalizeStandaloneState(rawState = {}) {
+  const compareIds = normalizeCompareIds(rawState.compare);
+  const normalizedDepth = Number(rawState.depth ?? currentDepth ?? 0);
+  const lgaId = rawState.lga_uid ?? rawState.lga_id ?? rawState.lga ?? null;
+  return {
+    state: rawState.state || currentState,
+    focus: rawState.focus || currentFocus,
+    depth: Number.isNaN(normalizedDepth) ? currentDepth : Math.max(0, Math.min(1, normalizedDepth)),
+    year: rawState.year != null ? String(rawState.year) : currentYear,
+    mobile: rawState.mobile != null ? String(rawState.mobile) : (isMobile ? '1' : '0'),
+    lga_uid: lgaId != null && String(lgaId).trim() !== '' ? String(lgaId) : '',
+    compare: compareIds,
+    layer: rawState.layer || currentLayer,
+    map_mode: rawState.map_mode || currentMapMode,
+    url: rawState.url || '',
+  };
+}
+
+async function refreshStandalonePayload(rawState = {}) {
+  if (!standaloneMode) return;
+
+  const nextState = normalizeStandaloneState(rawState);
+  const refreshToken = ++standaloneRefreshToken;
+  currentLayer = nextState.layer || currentLayer;
+  currentMapMode = nextState.map_mode || currentMapMode;
+
+  const url = nextState.url
+    ? new URL(nextState.url, window.location.origin)
+    : new URL(window.location.href);
+  url.searchParams.set('state', nextState.state);
+  url.searchParams.set('focus', nextState.focus);
+  url.searchParams.set('depth', String(nextState.depth));
+  url.searchParams.set('year', nextState.year);
+  url.searchParams.set('mobile', nextState.mobile);
+  if (nextState.lga_uid) url.searchParams.set('lga', nextState.lga_uid);
+  else url.searchParams.delete('lga');
+  if (nextState.compare.length) url.searchParams.set('compare', nextState.compare.join(','));
+  else url.searchParams.delete('compare');
+  window.history.replaceState({}, '', `${url.pathname}?${url.searchParams.toString()}`);
+
+  const query = new URLSearchParams({
+    state: nextState.state,
+    focus: nextState.focus,
+    depth: String(nextState.depth),
+    year: nextState.year,
+    mobile: nextState.mobile,
+  });
+  if (nextState.lga_uid) query.set('lga', nextState.lga_uid);
+  if (nextState.compare.length) query.set('compare', nextState.compare.join(','));
+
+  if (standaloneFetchController) {
+    standaloneFetchController.abort();
+  }
+  standaloneFetchController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+  setApplyStatus('Updating', 'updating');
+
+  try {
+    const response = await fetch(
+      `/api/data?${query.toString()}`,
+      standaloneFetchController ? { signal: standaloneFetchController.signal } : undefined,
+    );
+    if (!response.ok) {
+      throw new Error(`Standalone refresh failed: ${response.status}`);
+    }
+    const data = await response.json();
+    if (refreshToken !== standaloneRefreshToken) return;
+
+    resetMapDataState();
+    window.__INITIAL_DATA__ = data;
+    applyPayloadData(data, { preserveSelection: false, preserveCompare: false });
+    bootApp({ force: true, skipDeferredWork: true });
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.error('[HDS] standalone refresh error:', error);
+    setApplyStatus('Applied', 'applied');
+  }
+}
+
+function attachStandaloneMessageHandler() {
+  if (!standaloneMode || standaloneMessageHandlerAttached) return;
+  standaloneMessageHandlerAttached = true;
+  window.addEventListener('message', (event) => {
+    const message = event.data;
+    if (!message || message.type !== APP_STATE_MESSAGE_TYPE) return;
+    if (event.source && event.source !== window) return;
+    refreshStandalonePayload(message.state || {});
+  });
+}
+
 function flushStateToPython() {
   if (stateSyncLocked || !pendingStateUrl) return;
 
@@ -755,8 +1139,17 @@ function flushStateToPython() {
     return;
   }
 
+  const statePayload = buildStateMessagePayload();
+  if (standaloneMode) {
+    pendingEvent = null;
+    pendingStateUrl = '';
+    postStateMessage(statePayload);
+    return;
+  }
+
   stateSyncLocked = true;
   pendingEvent = null;
+  postStateMessage(statePayload);
   if (!replaceParentLocation(pendingStateUrl)) {
     stateSyncLocked = false;
     pendingStateUrl = '';
@@ -857,7 +1250,7 @@ if (urlParams.get('hotspot_limit')) {
 function renderHotspotCard(item, index) {
   const lgaId = sanitizeText(item.lga_id || item.id || '');
   const score = scoreOutOfTen(item) || 0;
-  const scoreColor = score > 5.5 ? '#d73027' : '#2166ac';
+  const scoreColor = score > 5.5 ? SCORE_COLOR_HIGH : SCORE_COLOR_LOW;
   const barColor = scoreColor;
   const barWidth = Math.min(100, Math.max(0, score * 10)).toFixed(1);
   const driver = sanitizeText(item.worst_driver, '');
@@ -959,7 +1352,6 @@ function initBottomSheetDrag() {
   if (!drawer.querySelector('.drag-handle')) {
     const handle = document.createElement('div');
     handle.className = 'drag-handle';
-    handle.setAttribute('aria-label', 'Drag to close');
     drawer.insertBefore(handle, drawer.firstChild);
   }
 
@@ -1110,7 +1502,7 @@ function renderDetail() {
     : 1;
 
   const heroScore = scoreOutOfTen(lga);
-  const heroScoreColor = heroScore != null && heroScore > 5.5 ? '#d73027' : '#2166ac';
+  const heroScoreColor = heroScore != null && heroScore > 5.5 ? SCORE_COLOR_HIGH : SCORE_COLOR_LOW;
   const heroScoreDisplay = heroScore != null ? heroScore.toFixed(2) : 'NA';
   const stateLabel = sanitizeText(lga.state_name || lga.state, 'Unknown state');
   const conf = confidenceBadge(lga.confidence_pct);
@@ -1339,6 +1731,7 @@ function setFocus(focus) {
   currentFocus = focus;
   syncHeader();
   renderHotspots();
+  updateLegend();
   renderMap();
   pushStateToPython();
   queueEvent('focus_change', { focus: currentFocus });
@@ -1468,8 +1861,8 @@ function runCompare() {
     if (val == null) return '';
     const best = higherIsBad ? Math.min(...nums) : Math.max(...nums);
     const worst = higherIsBad ? Math.max(...nums) : Math.min(...nums);
-    if (val === best) return ' style="background:rgba(34,197,94,0.13);color:#4ade80;font-weight:600"';
-    if (val === worst) return ' style="background:rgba(239,68,68,0.11);color:#f87171"';
+    if (val === best) return ` style="background:rgba(0,114,178,0.13);color:${STATUS_COLOR_GOOD};font-weight:600"`;
+    if (val === worst) return ` style="background:rgba(213,94,0,0.11);color:${STATUS_COLOR_BAD}"`;
     return '';
   }
 
@@ -1507,8 +1900,8 @@ function runCompare() {
           <button type="button" class="close-btn" id="compare-close-btn" aria-label="Close comparison">×</button>
         </div>
         <div class="compare-legend-note">
-          <span style="color:#4ade80">■</span> Best on metric &nbsp;
-          <span style="color:#f87171">■</span> Worst on metric &nbsp;
+          <span style="color:${STATUS_COLOR_GOOD}">■</span> Best on metric &nbsp;
+          <span style="color:${STATUS_COLOR_BAD}">■</span> Worst on metric &nbsp;
           <span style="opacity:0.5">■</span> Mid / no data
         </div>
         <div class="compare-body">
@@ -1594,8 +1987,6 @@ function initMap() {
 
   applyMapModeBaseLayer();
   queueMapResize();
-  queueMapResize(120);
-  queueMapResize(320);
 }
 
 function setMapEmptyState(message) {
@@ -1831,9 +2222,56 @@ function displayValue(id) {
   return fmtMetric(val);
 }
 
+function tooltipMetricForFocus(props) {
+  switch (currentFocus) {
+    case 'Child mortality':
+      return {
+        display: fmtMetric(props.u5mr ?? props.u5_mortality_rate ?? props.u5mr_mean),
+        label: 'U5 MORTALITY',
+        color: getColor(getFocusColorScore(props, currentFocus)),
+      };
+    case 'Facility access':
+      return {
+        display: fmtMetric(props.fac ?? props.facilities_per_10k),
+        label: 'FACILITIES / 10K',
+        color: getColor(getFocusColorScore(props, currentFocus)),
+      };
+    case 'Connectivity':
+      return {
+        display: fmtMetric(props.towers ?? props.towers_per_10k ?? props.connectivity_score ?? props.cov ?? props.coverage_5km),
+        label: hasTowerConnectivityData ? 'TOWERS / 10K' : 'CONNECTIVITY',
+        color: getColor(getFocusColorScore(props, currentFocus)),
+      };
+    case '5km coverage':
+      return {
+        display: fmtMetric(props.cov ?? props.coverage_5km),
+        label: '5KM COVERAGE',
+        color: getColor(getFocusColorScore(props, currentFocus)),
+      };
+    case '60-min coverage': {
+      const value = safeNum(props.pop_pct_60min);
+      let color = '#cbd5e1';
+      if (value != null && value < 40) color = '#d73027';
+      else if (value != null && value < 70) color = '#ff6b35';
+      return {
+        display: fmtMetric(props.pop_pct_60min),
+        label: '60-MIN COVERAGE',
+        color,
+      };
+    }
+    default: {
+      const score = Number(scoreOutOfTen(props) || 0);
+      return {
+        display: score.toFixed(2),
+        label: 'RISK SCORE',
+        color: score > 5.5 ? '#d73027' : '#2166ac',
+      };
+    }
+  }
+}
+
 function buildTooltipHTML(props) {
-  const score = Number(scoreOutOfTen(props) || 0);
-  const scoreColor = score > 5.5 ? '#d73027' : '#2166ac';
+  const metric = tooltipMetricForFocus(props);
   const driver = sanitizeText(props.worst_driver, '');
   const driverHtml = driver
     ? `<div style="margin-top:5px;font-size:8px;padding:2px 6px;border-radius:3px;
@@ -1844,15 +2282,29 @@ function buildTooltipHTML(props) {
     <div style="font-family:'IBM Plex Mono',monospace;min-width:130px;padding:2px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;
         color:#e8eaf0;margin-bottom:2px">${escapeHtml(sanitizeText(props.lga_name || props.name, ''))}</div>
-      <div style="font-size:9px;color:#6b7280;letter-spacing:.06em;margin-bottom:6px">
+      <div style="font-size:9px;color:${TEXT_COLOR_MUTED};letter-spacing:.06em;margin-bottom:6px">
         ${escapeHtml(sanitizeText(props.state_name || props.state, ''))}</div>
       <div style="font-size:28px;font-weight:800;font-family:'Syne',sans-serif;
-        color:${scoreColor};line-height:1">${score.toFixed(2)}</div>
-      <div style="font-size:8px;color:#4b5563;letter-spacing:.1em;
-        text-transform:uppercase;margin-top:1px">RISK SCORE</div>
+        color:${metric.color};line-height:1">${escapeHtml(metric.display)}</div>
+      <div style="font-size:8px;color:${TEXT_COLOR_DIM};letter-spacing:.1em;
+        text-transform:uppercase;margin-top:1px">${escapeHtml(metric.label)}</div>
       ${driverHtml}
     </div>
   `;
+}
+
+function ensureLayerTooltip(layer, props) {
+  if (!layer) return;
+  const tooltipHtml = buildTooltipHTML(props);
+  if (typeof layer.getTooltip === 'function' && layer.getTooltip()) {
+    layer.setTooltipContent(tooltipHtml);
+    return;
+  }
+  layer.bindTooltip(tooltipHtml, {
+    sticky: true,
+    direction: 'top',
+    className: 'hd-tooltip',
+  });
 }
 
 function styleForFeatureId(id) {
@@ -1870,10 +2322,10 @@ function styleForFeatureId(id) {
 }
 
 function initGeoLayer() {
-  if (!mapInstance || geoLayer) return;
+  if (!mapInstance || geoLayer) return false;
 
   const gj = normalizeGeoJson();
-  if (!gj) return;
+  if (!gj) return false;
 
   geoLayer = L.geoJSON(gj, {
     style: (feature) => {
@@ -1889,10 +2341,16 @@ function initGeoLayer() {
       feature.properties = props;
 
       featureLayerById.set(id, layer);
-      layer.bindTooltip(buildTooltipHTML(feature.properties), {
-        sticky: true,
-        direction: 'top',
-        className: 'hd-tooltip',
+      layer.on('mouseover', () => {
+        const nextProps = {
+          ...(feature.properties || {}),
+          ...(lgaById.get(id) || {}),
+        };
+        feature.properties = nextProps;
+        ensureLayerTooltip(layer, nextProps);
+        if (typeof layer.openTooltip === 'function') {
+          layer.openTooltip();
+        }
       });
       layer.on('click', () => selectLGA(id));
     },
@@ -1900,7 +2358,7 @@ function initGeoLayer() {
 
   if (!hasFitBounds) {
     try {
-      mapInstance.fitBounds(geoLayer.getBounds(), { padding: [10, 10] });
+      fitMapToCurrentState();
       hasFitBounds = true;
     } catch (e) {
       // ignore fit errors
@@ -1908,14 +2366,16 @@ function initGeoLayer() {
   }
 
   queueMapResize();
+  return true;
 }
 
 function renderMap() {
   initMap();
   if (!mapInstance) return;
 
-  initGeoLayer();
+  const layerWasCreated = initGeoLayer();
   if (!geoLayer) return;
+  if (layerWasCreated) return;
 
   featureLayerById.forEach((layer, id) => {
     layer.setStyle(styleForFeatureId(id));
@@ -1925,7 +2385,9 @@ function renderMap() {
       ...(lgaById.get(String(id)) || {}),
     };
     feature.properties = props;
-    layer.setTooltipContent(buildTooltipHTML(feature.properties));
+    if (typeof layer.getTooltip === 'function' && layer.getTooltip()) {
+      layer.setTooltipContent(buildTooltipHTML(feature.properties));
+    }
   });
 
   queueMapResize();
@@ -2152,6 +2614,13 @@ function buildSummaryExport() {
 
 async function buildBundleExport() {
   if (typeof JSZip === 'undefined') {
+    try {
+      await ensureExternalScript('assets/jszip.min.js', 'JSZip');
+    } catch (e) {
+      throw new Error('Bundle export is unavailable in this embedded render.');
+    }
+  }
+  if (typeof JSZip === 'undefined') {
     throw new Error('Bundle export is unavailable in this embedded render.');
   }
   const zip = new JSZip();
@@ -2215,7 +2684,7 @@ const TOUR_STEPS = [
       Higher means harder to reach care.<br><br>
       <div style="font-family:'Syne',sans-serif;font-size:48px;font-weight:800;
         color:#f97316;line-height:1;margin:12px 0">7.22</div>
-      <div style="font-size:10px;color:#4b5563;letter-spacing:.1em">
+      <div style="font-size:10px;color:${TEXT_COLOR_DIM};letter-spacing:.1em">
         TAMBUWAL &middot; SOKOTO &middot; EXAMPLE</div>
       <br>Score is based on facility density, distance to care,
       child mortality, and mobile coverage.`,
@@ -2223,8 +2692,8 @@ const TOUR_STEPS = [
   },
   {
     title: 'THE MAP',
-    body: `<strong style="color:#d73027">Red</strong> means high risk.
-      <strong style="color:#2166ac">Blue</strong> means lower risk.<br><br>
+    body: `<strong style="color:${SCORE_COLOR_HIGH}">Warm</strong> means high risk.
+      <strong style="color:${SCORE_COLOR_LOW}">Cool</strong> means lower risk.<br><br>
       The northwest cluster - Sokoto, Zamfara, Katsina - is Nigeria's
       hardest-access zone. The South shows better access on average,
       but significant LGA-level variation exists everywhere.<br><br>
@@ -2246,7 +2715,7 @@ const TOUR_STEPS = [
     body: `Select up to three LGAs and run a side-by-side comparison.
       The heatmap shows which LGA scores worst on each dimension -
       green is better, red is worse.<br><br>
-      <em style="color:#4b5563;font-size:10px">
+      <em style="color:${TEXT_COLOR_DIM};font-size:10px">
       Decision-support only. Always combine with local field knowledge
       before planning decisions.</em><br><br>
       Two LGAs have been pre-loaded for you. Run the comparison now ->`,
@@ -2285,6 +2754,7 @@ function renderTourStep() {
 }
 
 function maybeStartTour() {
+  if (pwaMode) return;
   const completed = localStorage.getItem(TOUR_STORAGE_KEY) === '1';
   if (!completed) openTour();
 }
@@ -2335,9 +2805,7 @@ function toggleLayer(layerName) {
     btn.setAttribute('aria-pressed', String(active));
   });
 
-  const legendTitle = document.querySelector('.legend-title');
-  if (legendTitle) legendTitle.textContent = currentLayer;
-
+  updateLegend();
   renderMap();
 }
 
@@ -2366,35 +2834,27 @@ function detectMobile() {
   }
 }
 
-function wireEvents() {
-  const stateSelect = document.getElementById('state-select');
-  stateOptions.forEach((st) => {
-    const opt = document.createElement('option');
-    opt.value = st;
-    opt.textContent = st;
-    stateSelect.appendChild(opt);
-  });
-  stateSelect.value = currentState;
-  stateSelect.addEventListener('change', (e) => {
-    handleStateChange(e.target.value);
-  });
+let eventsWired = false;
+let supportUiBootstrapped = false;
+let lifecycleHandlersBound = false;
 
-  const yearSelect = document.getElementById('year-select');
-  yearSelect.value = currentYear;
-  yearSelect.addEventListener('change', (e) => {
-    currentYear = e.target.value;
-    syncHeader();
-    // Re-render hotspots and map to reflect year change
-    renderHotspots();
-    renderMap();
-    // Update the header to show user data changed
-    setApplyStatus(`Year updated to ${currentYear}`, 'updating');
-    pushStateToPython();
-    queueEvent('filter_change', { year: currentYear });
-  });
+function syncStateSelectOptions() {
+  const stateSelect = document.getElementById('state-select');
+  if (stateSelect) {
+    const previousValue = stateSelect.value || currentState;
+    stateSelect.replaceChildren();
+    stateOptions.forEach((st) => {
+      const opt = document.createElement('option');
+      opt.value = st;
+      opt.textContent = st;
+      stateSelect.appendChild(opt);
+    });
+    stateSelect.value = stateOptions.includes(currentState) ? currentState : previousValue;
+  }
 
   const stateMobile = document.getElementById('state-select-mobile');
   if (stateMobile) {
+    const previousValue = stateMobile.value || currentState;
     stateMobile.replaceChildren();
     stateOptions.forEach((st) => {
       const opt = document.createElement('option');
@@ -2402,27 +2862,88 @@ function wireEvents() {
       opt.textContent = st;
       stateMobile.appendChild(opt);
     });
-    stateMobile.value = currentState;
-    stateMobile.addEventListener('change', (e) => {
-      if (stateSelect) stateSelect.value = e.target.value;
-      handleStateChange(e.target.value);
-    });
+    stateMobile.value = stateOptions.includes(currentState) ? currentState : previousValue;
   }
 
+  const yearSelect = document.getElementById('year-select');
+  if (yearSelect) yearSelect.value = currentYear;
   const yearMobile = document.getElementById('year-select-mobile');
-  if (yearMobile) {
-    yearMobile.value = currentYear;
-    yearMobile.addEventListener('change', (e) => {
-      currentYear = e.target.value;
-      if (yearSelect) yearSelect.value = currentYear;
-      syncHeader();
-      renderHotspots();
-      renderMap();
-      setApplyStatus(`Year updated to ${currentYear}`, 'updating');
-      pushStateToPython();
-      queueEvent('filter_change', { year: currentYear });
-    });
-  }
+  if (yearMobile) yearMobile.value = currentYear;
+}
+
+function configureSupportLinks() {
+  const methodLink = document.getElementById('methodology-link');
+  const glossaryLink = document.getElementById('glossary-link');
+  const mobileMethodLink = document.getElementById('mobile-more-methodology-link');
+  const mobileGlossaryLink = document.getElementById('mobile-more-glossary-link');
+  [methodLink, glossaryLink, mobileMethodLink, mobileGlossaryLink].forEach((link) => {
+    if (!link) return;
+
+    const rawHref = link.getAttribute('href') || '';
+    const parentUrl = getAppStateBaseUrl();
+    const baseHref = parentUrl ? `${parentUrl.origin}${parentUrl.pathname}` : 'http://localhost/';
+    const parsed = new URL(rawHref, baseHref);
+    const navUrl = new URL(parsed.href);
+    if (testingMode) {
+      navUrl.searchParams.set('testing', '1');
+      if (testPersona) navUrl.searchParams.set('persona', testPersona);
+      if (testSession) navUrl.searchParams.set('session', testSession);
+    }
+
+    const targetHref = navUrl.search ? `${navUrl.pathname}?${navUrl.searchParams.toString()}` : navUrl.pathname;
+    link.setAttribute('href', targetHref);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+  });
+}
+
+function primeDeferredUi() {
+  if (supportUiBootstrapped) return;
+  supportUiBootstrapped = true;
+  applyHelpTooltips();
+  configureSupportLinks();
+  initBottomSheetDrag();
+}
+
+function wireEvents() {
+  syncStateSelectOptions();
+  if (eventsWired) return;
+  eventsWired = true;
+
+  const stateSelect = document.getElementById('state-select');
+  const yearSelect = document.getElementById('year-select');
+  const stateMobile = document.getElementById('state-select-mobile');
+  const yearMobile = document.getElementById('year-select-mobile');
+
+  stateSelect?.addEventListener('change', (e) => {
+    handleStateChange(e.target.value);
+  });
+
+  yearSelect?.addEventListener('change', (e) => {
+    currentYear = e.target.value;
+    syncHeader();
+    renderHotspots();
+    renderMap();
+    setApplyStatus(`Year updated to ${currentYear}`, 'updating');
+    pushStateToPython();
+    queueEvent('filter_change', { year: currentYear });
+  });
+
+  stateMobile?.addEventListener('change', (e) => {
+    if (stateSelect) stateSelect.value = e.target.value;
+    handleStateChange(e.target.value);
+  });
+
+  yearMobile?.addEventListener('change', (e) => {
+    currentYear = e.target.value;
+    if (yearSelect) yearSelect.value = currentYear;
+    syncHeader();
+    renderHotspots();
+    renderMap();
+    setApplyStatus(`Year updated to ${currentYear}`, 'updating');
+    pushStateToPython();
+    queueEvent('filter_change', { year: currentYear });
+  });
 
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.addEventListener('input', renderHotspots);
@@ -2525,73 +3046,74 @@ function wireEvents() {
     tourIndex += 1;
     renderTourStep();
   });
-
-  applyHelpTooltips();
-
-  const methodLink = document.getElementById('methodology-link');
-  const glossaryLink = document.getElementById('glossary-link');
-  const mobileMethodLink = document.getElementById('mobile-more-methodology-link');
-  const mobileGlossaryLink = document.getElementById('mobile-more-glossary-link');
-  [methodLink, glossaryLink, mobileMethodLink, mobileGlossaryLink].forEach((link) => {
-    if (!link) return;
-
-    const rawHref = link.getAttribute('href') || '';
-    const parentUrl = getAppStateBaseUrl();
-    const baseHref = parentUrl ? `${parentUrl.origin}${parentUrl.pathname}` : 'http://localhost/';
-    const parsed = new URL(rawHref, baseHref);
-    const navUrl = new URL(parsed.href);
-    if (testingMode) {
-      navUrl.searchParams.set('testing', '1');
-      if (testPersona) navUrl.searchParams.set('persona', testPersona);
-      if (testSession) navUrl.searchParams.set('session', testSession);
-    }
-
-    const targetHref = navUrl.search ? `${navUrl.pathname}?${navUrl.searchParams.toString()}` : navUrl.pathname;
-    link.setAttribute('href', targetHref);
-    link.setAttribute('target', '_blank');
-    link.setAttribute('rel', 'noopener noreferrer');
-  });
-
-  initBottomSheetDrag();
 }
 
 let appBooted = false;
 
-function bootApp() {
-  if (appBooted || bootstrappingLatestYear) return;
-  appBooted = true;
+function bootApp({ force = false, skipDeferredWork = false } = {}) {
+  if ((!window.__INITIAL_DATA__ && !meta.focus) || bootstrappingLatestYear) return;
+  if (appBooted && !force) return;
   try {
     wireEvents();
     detectMobile();
-    window.addEventListener('resize', () => {
-      detectMobile();
-      queueMapResize(80);
-    });
-    window.addEventListener('load', () => queueMapResize(180), { once: true });
-    if (testingMode && testSession) {
+    attachStandaloneMessageHandler();
+
+    if (!lifecycleHandlersBound) {
+      lifecycleHandlersBound = true;
+      window.addEventListener('resize', () => {
+        detectMobile();
+        queueMapResize(80);
+      });
+      window.addEventListener('load', () => queueMapResize(180), { once: true });
+    }
+
+    if (!appBooted && testingMode && testSession) {
       pushStateToPython({ immediate: true });
     }
+
+    syncStateSelectOptions();
     syncHeader();
     applyDepthVisibility();
     renderHotspots();
-    renderCompareSlots();
     switchMapMode(currentMapMode);
-    fitMapToCurrentState();
-    applyStateDimming();
-    maybeStartTour();
 
     if (selectedLGA) {
       openDrawer();
-      renderDetail();
+      if (force || skipDeferredWork) {
+        renderDetail();
+      }
+    } else {
+      document.getElementById('detail-drawer')?.classList.remove('open');
+      document.getElementById('drawer-backdrop')?.remove();
     }
 
-    scheduleBootOverlayHide(80);
+    if (document.getElementById('map-table')?.classList.contains('open')) {
+      renderMapTable();
+    }
+
+    if (skipDeferredWork) {
+      renderCompareSlots();
+      syncMobileMoreMeta();
+    } else {
+      scheduleNonCriticalWork(() => {
+        primeDeferredUi();
+        renderCompareSlots();
+        syncMobileMoreMeta();
+        if (selectedLGA) renderDetail();
+      });
+      if (!appBooted) {
+        scheduleNonCriticalWork(() => maybeStartTour(), 1200);
+      }
+    }
+
+    appBooted = true;
+    scheduleBootOverlayHide(force ? 0 : 80);
   } catch (err) {
     reportBootError(err);
   }
 }
 
-if (!bootstrappingLatestYear) {
+if (window.__INITIAL_DATA__ && !bootstrappingLatestYear) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bootApp, { once: true });
   } else {

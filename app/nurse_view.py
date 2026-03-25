@@ -24,6 +24,9 @@ LOW_FACILITIES = 1.0
 HIGH_DISTANCE = 5.0
 LOW_TOWERS = 0.5
 LOW_COVERAGE = 250.0
+COLOR_GOOD = "#0072B2"
+COLOR_WARN = "#E69F00"
+COLOR_BAD = "#D55E00"
 
 
 def render_focus_filter() -> str:
@@ -48,26 +51,70 @@ def get_ranked_lgas(df: pd.DataFrame, focus: str) -> pd.DataFrame:
 def _risk_badge(score: float | None) -> str:
     if score is None or (isinstance(score, float) and np.isnan(score)):
         return '<span style="padding:2px 8px;border-radius:4px;font-size:11px;font-family:monospace;background:#1f2937;color:#e5e7eb;">NA</span>'
-    color = "#ef4444" if score > 0.66 else "#eab308" if score > 0.33 else "#22c55e"
+    color = COLOR_BAD if score > 0.66 else COLOR_WARN if score > 0.33 else COLOR_GOOD
     return (
         f'<span style="background:{color}20;color:{color};padding:2px 8px;'
         f'border-radius:4px;font-size:11px;font-family:monospace">{score*100:.0f}</span>'
     )
 
 
-def render_hotspot_list(top_lgas: pd.DataFrame) -> Optional[str]:
-    clicked_uid: Optional[str] = None
-    for _, row in top_lgas.head(10).iterrows():
-        col_rank, col_info, col_badge = st.columns([1, 5, 2])
-        with col_rank:
-            st.caption(f"{int(row['rank']):02d}", help="Ranking within current focus and state")
-        with col_info:
-            label = f"**{row['lga_name']}**\n\n{row['state_name']}"
-            if st.button(label, key=f"lga_{row['lga_uid']}"):
-                clicked_uid = str(row["lga_uid"])
-        with col_badge:
-            st.markdown(_risk_badge(row.get("risk_score")), unsafe_allow_html=True)
-    return clicked_uid
+def _model_version_label(model_version: str | list[str] | tuple[str, ...] | None) -> str:
+    if isinstance(model_version, (list, tuple)):
+        cleaned = [str(item) for item in model_version if item]
+        return ", ".join(cleaned) if cleaned else "Unknown"
+    if model_version:
+        return str(model_version)
+    return "Unknown"
+
+
+def render_methodology_panel(
+    features_df: pd.DataFrame,
+    active_year: str | int | None = None,
+    model_version: str | list[str] | tuple[str, ...] | None = None,
+) -> None:
+    scoped = features_df.copy()
+    if "lga_uid" in scoped.columns:
+        scoped = scoped.drop_duplicates(subset=["lga_uid"])
+
+    if active_year is None and "year" in scoped.columns:
+        years = [str(year) for year in pd.to_numeric(scoped["year"], errors="coerce").dropna().astype(int).unique().tolist()]
+        active_year = years[0] if len(years) == 1 else "Multiple"
+
+    if model_version is None:
+        attr_version = features_df.attrs.get("model_version") if hasattr(features_df, "attrs") else None
+        if attr_version:
+            model_version = attr_version
+        elif "model_version" in scoped.columns:
+            versions = scoped["model_version"].dropna().astype(str).unique().tolist()
+            model_version = versions or None
+
+    risk_series = pd.to_numeric(scoped.get("risk_score"), errors="coerce")
+    lga_count = int(scoped["lga_uid"].nunique()) if "lga_uid" in scoped.columns else int(len(scoped))
+    median_risk = float(risk_series.median()) if risk_series.notna().any() else None
+
+    with st.container(border=True):
+        st.caption("METHODOLOGY")
+        stat1, stat2 = st.columns(2)
+        stat3, stat4 = st.columns(2)
+        with stat1:
+            st.metric("Model version", _model_version_label(model_version))
+        with stat2:
+            st.metric("Active year", str(active_year or "Unknown"))
+        with stat3:
+            st.metric("LGAs scored", f"{lga_count}")
+        with stat4:
+            st.metric("Median risk", f"{median_risk:.3f}" if median_risk is not None else "NA")
+
+        st.markdown(_risk_badge(median_risk), unsafe_allow_html=True)
+        st.markdown(
+            (
+                "The composite score combines facilities per 10,000 people, routed travel time access, "
+                "child mortality, connectivity, and 5km coverage into a single access-risk signal. "
+                "Each input is normalized onto a common scale and then weighted into a 0-1 score, "
+                "where higher values indicate greater barriers to reaching care. "
+                "It is a planning aid, not a diagnosis, and should be used alongside local operational knowledge."
+            )
+        )
 
 
 def render_download_button(top_lgas: pd.DataFrame, focus: str) -> None:

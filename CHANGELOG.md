@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-03-25
+
+### Added
+- Added a standalone FastAPI runtime in `app/api.py` plus service worker assets and PWA icons so the Nigeria UI can run directly at `localhost:8601` without the Streamlit iframe loop.
+- Added a reusable `scripts/validate_pwa.ps1` helper for local API plus PWA wiring checks.
+- Added a compact methodology panel to the Streamlit host so the embedded app has adjacent model and scope context.
+
+### Changed
+- Changed the Streamlit host to render the Nigeria app directly with `st.components.v1.html(...)` instead of writing a temporary served file.
+- Changed embedded payload generation so state-filtered views keep nationwide map geometry available for local chip and LGA rehydration flows.
+- Changed the standalone PWA shell to load only first-render assets up front, defer noncritical UI work, and use non-blocking font loading.
+- Changed app palettes in the Folium and nurse-view surfaces to an Okabe-Ito-style colorblind-safe scale.
+- Changed the global landing pages to report three DHS survey waves.
+- Changed travel-time generation to support local ORS execution, checkpoint-only rebuilds, and bounded-memory checkpoint consolidation.
+
+### Fixed
+- Fixed the standalone chip and polygon selection loop so clicks update URL state, refetch payload data, recolor the map, and refresh the sidebar without a hard reload.
+- Fixed the `Data / Map / Print` control alignment relative to the map chip row.
+- Fixed deployed Nigeria rendering so the app no longer depends on a browser-local temporary file server path.
+- Fixed PWA startup performance by deferring compare, tutorial, print, and support UI work until after first paint.
+
+### Verification
+- `pytest -q`
+- `node tests/accessibility_test.js`
+- `python -m streamlit run app/app.py --server.headless true --server.port 8501`
+- `node tmp/playwright_probe.js`
+- `npx.cmd lighthouse http://127.0.0.1:8601/?pwa=1 --only-categories=performance --output=json --output-path=tmp/lighthouse-pwa.json --chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage"`
+
+## [1.4.0] - 2026-03-24
+
 ### Added
 - Added versioned model artifact output for `models/risk_model_v1.4/`, including `metadata.json` and `MODEL_CARD.md`.
 - Added a two-stage Nigeria scoring strategy that keeps a shared all-year base model and applies routed `pop_pct_60min` recalibration to 2024 only.

@@ -12,10 +12,10 @@ from folium.features import DivIcon
 from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 
-# Lightly saturated traffic-light palette
-COLOR_GOOD = "#22c55e"
-COLOR_WARN = "#eab308"
-COLOR_BAD = "#ef4444"
+# Okabe-Ito CVD-safe palette
+COLOR_GOOD = "#0072B2"
+COLOR_WARN = "#E69F00"
+COLOR_BAD = "#D55E00"
 COLOR_BORDER = "#111827"
 COLOR_SELECTED = "#ffffff"
 
