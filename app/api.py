@@ -22,6 +22,7 @@ JS_PATH = APP_DIR / "health_desert_ui.js"
 SW_PATH = APP_DIR / "sw.js"
 ASSETS_DIR = APP_DIR / "assets"
 STATIC_DIR = APP_DIR / "static"
+LANDING_PATH = STATIC_DIR / "index.html"
 
 app = FastAPI(title="Health Desert NG API")
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
@@ -44,11 +45,14 @@ def _json_response(payload: dict) -> Response:
 
 
 @app.get("/")
-def root(request: Request) -> RedirectResponse:
-    target = request.url_for("health_desert_ui")
-    if request.url.query:
-        target = f"{target}?{request.url.query}"
-    return RedirectResponse(url=target, status_code=307)
+def root() -> FileResponse:
+    return FileResponse(LANDING_PATH)
+
+
+@app.get("/ng")
+@app.get("/ng/")
+def nigeria_dashboard() -> FileResponse:
+    return FileResponse(HTML_PATH)
 
 
 @app.get("/health_desert_ui.html")
@@ -95,7 +99,7 @@ def data(
             "hd_compare_lgas": compare_lgas,
             "hd_selected_lga": lga,
             "hd_is_mobile": is_mobile,
-            "hd_parent_app_path": "/health_desert_ui.html",
+            "hd_parent_app_path": "/ng",
         },
     )
     return _json_response(payload)

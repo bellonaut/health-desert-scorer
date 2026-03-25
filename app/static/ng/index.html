@@ -4,17 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Redirecting to Nigeria Dashboard</title>
-<meta http-equiv="refresh" content="0; url=https://bashir-healthdesert.streamlit.app/?app=ng">
+<meta http-equiv="refresh" content="0; url=/health_desert_ui.html">
 <script>
 (function redirectToNigeriaDashboard() {
   var sourceUrl = new URL(window.location.href);
-  var targetUrl = new URL("https://bashir-healthdesert.streamlit.app/");
-  targetUrl.searchParams.set("app", "ng");
+  var targetUrl = new URL("/health_desert_ui.html", window.location.origin);
 
   sourceUrl.searchParams.forEach(function (value, key) {
-    if (key !== "app") {
-      targetUrl.searchParams.set(key, value);
-    }
+    targetUrl.searchParams.set(key, value);
   });
 
   if (sourceUrl.hash) {
@@ -27,6 +24,6 @@
 </head>
 <body>
 <p>Redirecting to Nigeria dashboard...</p>
-<p><a href="https://bashir-healthdesert.streamlit.app/?app=ng">Continue</a></p>
+<p><a href="/health_desert_ui.html">Continue</a></p>
 </body>
 </html>

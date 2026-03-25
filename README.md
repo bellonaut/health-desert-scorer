@@ -2,8 +2,8 @@
 
 A web-based planning tool to identify Local Government Areas (LGAs) with higher barriers to healthcare access.
 
-**Live app (landing):** https://bashir-healthdesert.streamlit.app/  
-**Nigeria dashboard (direct):** https://bashir-healthdesert.streamlit.app/?app=ng  
+**Standalone public route:** `/ng` on the deployed FastAPI host  
+**Legacy Streamlit fallback:** https://bashir-healthdesert.streamlit.app/?app=ng  
 **Website:** https://www.bashir.bio
 
 ---
@@ -11,7 +11,7 @@ A web-based planning tool to identify Local Government Areas (LGAs) with higher 
 ## Global Landing Routing
 Planned production routing:
 - `https://healthdesert.io/` -> globe landing page (static)
-- `https://healthdesert.io/ng` -> Nigeria Streamlit app
+- `https://healthdesert.io/ng` -> Nigeria standalone PWA
 - `https://healthdesert.io/ca` -> Canada app (future)
 
 Implementation notes are in `docs/global_landing_deployment.md`.
@@ -34,7 +34,7 @@ Healthcare outcomes are strongly influenced by access barriers, including distan
 ---
 
 ## Quick start
-1. Open the dashboard directly: https://bashir-healthdesert.streamlit.app/?app=ng
+1. Open the deployed standalone dashboard at `/ng` on the public host, or use the legacy Streamlit fallback: https://bashir-healthdesert.streamlit.app/?app=ng
 2. Select a **State** (or keep **All Nigeria**).
 3. Select a **Year**.
 4. Use the left panel to search an LGA and set a focus:

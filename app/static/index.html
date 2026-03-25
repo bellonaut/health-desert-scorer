@@ -538,7 +538,9 @@ function resolveNigeriaRoute() {
   }
 
   const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-  const isStreamlitHost = host.endsWith('streamlit.app') || isLocalHost;
+  const port = window.location.port || '';
+  const isLocalStreamlit = isLocalHost && port === '8501';
+  const isStreamlitHost = host.endsWith('streamlit.app') || isLocalStreamlit;
   return (inEmbeddedParent || isStreamlitHost) ? '/?app=ng' : '/ng';
 }
 
