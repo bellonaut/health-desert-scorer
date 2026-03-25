@@ -1,9 +1,9 @@
 # Cloudflare Pages / Netlify-style redirects for the transition period.
 
-# Nigeria app lives on Streamlit for now.
-/ng    https://bashir-healthdesert.streamlit.app/?app=ng    302
-/ng/   https://bashir-healthdesert.streamlit.app/?app=ng    302
-/ng/*  https://bashir-healthdesert.streamlit.app/?app=ng    302
+# Nigeria app now targets the same-origin standalone PWA route.
+/ng    /health_desert_ui.html    302
+/ng/   /health_desert_ui.html    302
+/ng/*  /health_desert_ui.html    302
 
 # Canada route is reserved; send to landing until CA app is live.
 /ca    /    302

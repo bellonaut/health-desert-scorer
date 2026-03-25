@@ -15,6 +15,7 @@ All notable changes to this project are documented in this file.
 - Changed the Streamlit host to render the Nigeria app directly with `st.components.v1.html(...)` instead of writing a temporary served file.
 - Changed embedded payload generation so state-filtered views keep nationwide map geometry available for local chip and LGA rehydration flows.
 - Changed the standalone PWA shell to load only first-render assets up front, defer noncritical UI work, and use non-blocking font loading.
+- Changed the standalone FastAPI app to serve the public landing at `/` and the Nigeria PWA at `/ng`, with same-origin public redirect assets instead of hardcoded Streamlit routing.
 - Changed app palettes in the Folium and nurse-view surfaces to an Okabe-Ito-style colorblind-safe scale.
 - Changed the global landing pages to report three DHS survey waves.
 - Changed travel-time generation to support local ORS execution, checkpoint-only rebuilds, and bounded-memory checkpoint consolidation.
